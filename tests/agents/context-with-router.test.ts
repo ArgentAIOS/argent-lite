@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAgentContext, MessageBus } from "../../src/agents/index.js";
+import { createNoopMemory } from "../../src/agents/__fixtures__/noop-memory.js";
 import {
   withRouter,
   type AgentContextWithRouter,
@@ -35,6 +36,7 @@ describe("withRouter", () => {
       abort: abort.signal,
       logger,
       now,
+      memory: createNoopMemory(),
     });
     const router = mockRouter();
 
@@ -48,7 +50,7 @@ describe("withRouter", () => {
   });
 
   it("does not mutate the source AgentContext", () => {
-    const ctx = createAgentContext();
+    const ctx = createAgentContext({ memory: createNoopMemory() });
     const router = mockRouter();
     const wrapped = withRouter(ctx, router);
 
@@ -57,7 +59,7 @@ describe("withRouter", () => {
   });
 
   it("routes through the attached router", async () => {
-    const ctx = createAgentContext();
+    const ctx = createAgentContext({ memory: createNoopMemory() });
     const router = mockRouter();
     const wrapped = withRouter(ctx, router);
 

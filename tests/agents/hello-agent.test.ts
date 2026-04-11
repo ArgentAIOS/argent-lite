@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { HelloAgent } from "../../src/agents/hello-agent.js";
 import { MessageBus } from "../../src/agents/message-bus.js";
 import { createAgentContext } from "../../src/agents/agent-context.js";
+import { createNoopMemory } from "../../src/agents/__fixtures__/noop-memory.js";
 import type { AgentMessage } from "../../src/agents/types.js";
 
 function makeHarness() {
   const abort = new AbortController();
   const bus = new MessageBus();
-  const ctx = createAgentContext({ bus, abort: abort.signal });
+  const ctx = createAgentContext({ bus, abort: abort.signal, memory: createNoopMemory() });
   const agent = new HelloAgent("hello", ctx);
   return { abort, bus, ctx, agent };
 }
