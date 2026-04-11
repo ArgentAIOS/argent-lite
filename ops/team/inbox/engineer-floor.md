@@ -1,57 +1,63 @@
-# Task 006 — engineer-floor
+# Task 007 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: demo-runner
-Branch: codex/demo-runner (worktree /home/jason/code/argent-lite-floor)
+Slice: hailo-bootstrap
+Branch: codex/hailo-bootstrap (worktree /home/jason/code/argent-lite-floor)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-floor.md
-- src/demo/runner.ts
-- src/demo/README.md
-- tests/demo/runner.test.ts
-- package.json                              (add "demo" script only)
+- scripts/hailo-setup.sh
+- scripts/hailo-check.sh
+- docs/hailo-setup.md
+- src/providers/hailo-runtime.ts
+- tests/providers/hailo-runtime.test.ts
 
 ## Context
 
-Phase 2 shipped isolated skeletons for agents + scheduler but nothing
-wires them to the router yet. Your job: write a demo runner that
-boots a `Scheduler`, registers a single `HelloAgent` (from engineer-auth's
-cycle-6 slice `codex/agent-helloagent`), enqueues a task, ticks the
-scheduler, and prints the output.
+Raspberry Pi AI HAT+ 2 with Hailo-10H arrives 2026-04-12 (tomorrow).
+Pre-stage a setup script and a runtime probe so we can plug the board
+in and verify in under 60 seconds.
 
 ## Goal
 
-1. **`src/demo/runner.ts`** — async `runDemo()` that:
-   - Constructs a `MessageBus`, `AgentContext`, `Scheduler`.
-   - Dynamically imports `HelloAgent` from `../agents/hello-agent.js`
-     (guarded by try/catch so your branch builds standalone if
-     engineer-auth's branch isn't merged yet).
-   - If HelloAgent is available, registers it, enqueues a "greet"
-     task, ticks once, awaits result.
-   - If not, prints `[demo] HelloAgent not available on this branch`
-     and exits 0.
-2. **`src/demo/README.md`** — one paragraph.
-3. **`tests/demo/runner.test.ts`** — test with a mocked `HelloAgent`
-   (injected) that verifies the runner calls `register → enqueue → tick`
-   in order and returns the agent's echoed greeting.
-4. **`package.json`** — add `"demo": "node --loader tsx/esm src/demo/runner.ts"`
-   to `scripts`. DO NOT add dependencies.
+1. **`scripts/hailo-setup.sh`** — bash, `set -euo pipefail`. Steps:
+   - `lsmod | grep hailo` — report loaded kernel module (ok if absent; warn).
+   - `lspci | grep -i hailo` — detect the card. Report vendor/device ID.
+   - `command -v hailortcli` — check Hailo runtime CLI is installed; if
+     missing, print the install command and exit 2.
+   - `hailortcli fw-control identify` — query the card if the CLI is present.
+   - Write a structured summary to `/tmp/hailo-setup-$(date +%s).log`.
+   - Exit 0 on success, 2 on recoverable gaps (CLI missing), 1 on unexpected.
+   - Pure probe — never installs, never modifies system state.
+2. **`scripts/hailo-check.sh`** — thinner, returns exit 0 iff a Hailo-10H
+   is present and responsive; meant for CI and nightly smoke.
+3. **`docs/hailo-setup.md`** — one page:
+   - Hardware: Raspberry Pi AI HAT+ 2 (Hailo-10H), PCIe Gen 3 x4.
+   - Reference: Pudding Entertainment Medium article (URL in a comment).
+   - Debian 12 install steps (apt packages, pcie_aspm=off, reboot).
+   - Purge order if Hailo-8 stack was installed previously.
+   - Smoke: run `scripts/hailo-check.sh`.
+4. **`src/providers/hailo-runtime.ts`** — exports `probeHailo(): Promise<{present: boolean; deviceId?: string; firmware?: string; error?: string}>`.
+   Uses `child_process.execFile` to call `hailortcli fw-control identify`
+   and parse stdout. Never throws — returns the error in the object.
+5. **`tests/providers/hailo-runtime.test.ts`** — mocks
+   `node:child_process.execFile` via `vi.mock`, asserts:
+   - when the command succeeds with sample output, returns `{ present: true, ... }`
+   - when the command is missing (ENOENT), returns `{ present: false, error: ... }`
 
 ## Constraints
 
-- Do NOT touch `src/agents/**` or `src/scheduler/**` — read-only imports.
-- Strict TS, ESM `.js` specifiers, no `any`.
+- Node built-ins only. Use `node:child_process` and `node:util`
+  (for `promisify`).
+- Do NOT touch `src/providers/hailo.ts` — that's the cycle-4 stub and
+  stays untouched.
+- Strict TS, ESM, no `any`.
 
 ## Acceptance criterion
 
-- 3 source + 1 test file created; package.json has the demo script.
-- `pnpm check` and `pnpm test tests/demo/` pass.
-- SELF-COMMIT, PUSH, `gh pr create --base codex/ops-team-bootstrap --head codex/demo-runner`.
-
-## Validation
-
-- `pnpm check` — exit 0
-- `pnpm test tests/demo/` — pass
-- `pnpm demo` — should print something (stub-tolerant)
+- All 5 files exist.
+- `bash -n scripts/hailo-setup.sh` && `bash -n scripts/hailo-check.sh` pass.
+- `pnpm check && pnpm test tests/providers/hailo-runtime.test.ts` pass.
+- SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
 ## Deadline
 

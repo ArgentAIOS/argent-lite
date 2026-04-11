@@ -1,43 +1,40 @@
-# Task 006 — reviewer
+# Task 007 — reviewer
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle6-review
+Slice: cycle7-review
 Branch: codex/phase1-review (worktree /home/jason/code/argent-lite-review)
-Surface: read-only except ops/team/outbox/reviewer.md.
+Surface: read-only except ops/team/outbox/reviewer.md (in your worktree).
 
 ## Context
 
-Cycle-5 integrated at `9373530` (78/78 tests). Cycle-6 runs 4 new
-slices in parallel:
+Cycle-6 integrated at `34ac4aa` (90/90 tests). Cycle-7 slices:
 
 | Role | Branch | Slice |
 | --- | --- | --- |
-| architect | codex/memory-lite-design | Phase 3 memory design |
-| engineer-floor | codex/demo-runner | end-to-end demo runner |
-| engineer-auth | codex/agent-helloagent | HelloAgent proof |
-| engineer-router | codex/context-router-bridge | agents ↔ router wiring |
+| architect | codex/channels-lite-design | Phase 3 channels design |
+| engineer-floor | codex/hailo-bootstrap | Hailo setup scripts + runtime probe |
+| engineer-auth | codex/memory-store-impl | SQLite MemoryStore impl |
+| engineer-router | codex/router-agent | RouterAgent (real router call over bus) |
 
-## Goal — ONE single pass, then exit
+## Goal — ONE pass, no PR
 
-**Do not commit a PR for your review outbox** — previous cycle
-accidentally opened PR #12. Write only to
-`ops/team/outbox/reviewer.md` in your worktree and let threadmaster
-read it directly. Do NOT run `git add/commit/push` for the review
-outbox. Do NOT run `gh pr create`.
+Run exactly ONE review pass. **Do NOT git commit/push** the outbox
+— threadmaster reads it directly from your worktree. Do NOT
+`gh pr create`.
 
-Single pass format:
+Single pass format (overwrite `ops/team/outbox/reviewer.md` in your worktree):
 
 ```
 I have read ops/ and am operating under contract:
 ops/contracts/reviewer.contract.md.
 
-## Review pass — cycle-6 — <ISO timestamp>
+## Review pass — cycle-7 — <ISO timestamp>
 
 ### Branch commit check
-- codex/memory-lite-design    : <sha or NO-COMMITS>
-- codex/demo-runner           : <sha or NO-COMMITS>
-- codex/agent-helloagent      : <sha or NO-COMMITS>
-- codex/context-router-bridge : <sha or NO-COMMITS>
+- codex/channels-lite-design : <sha or NO-COMMITS>
+- codex/hailo-bootstrap      : <…>
+- codex/memory-store-impl    : <…>
+- codex/router-agent         : <…>
 
 ### Test status
 - <branch>: <pnpm test result or SKIPPED>
@@ -54,12 +51,6 @@ ops/contracts/reviewer.contract.md.
 ### Verdict
 OVERALL: <PASS|FAIL|BLOCKED>
 ```
-
-## Acceptance criterion
-
-- Review pass overwrites `ops/team/outbox/reviewer.md` in your worktree.
-- NO git commit, NO PR.
-- Run once and exit.
 
 ## Deadline
 
