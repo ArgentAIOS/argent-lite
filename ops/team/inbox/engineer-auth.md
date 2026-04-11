@@ -1,64 +1,46 @@
-# Task 015 — engineer-auth
+# Task 016 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: satellite-server-wiring
-Branch: codex/satellite-server-wiring (worktree /home/jason/code/argent-lite-auth)
-Surface (WRITE authorized — nothing else):
+Slice: memory-telemetry
+Branch: codex/memory-telemetry (worktree /home/jason/code/argent-lite-auth)
+Surface:
 - ops/team/outbox/engineer-auth.md
-- src/satellite/runtime-server.ts
-- tests/satellite/runtime-server.test.ts
-
-## Context
-
-Cycle-4 shipped `src/satellite/server.ts` (PR #7) with a basic HTTP
-server. Cycle-10 shipped `src/satellite/auth.ts` (PR #31) with HMAC +
-bearer token `requireAuth`. Connect them: a new higher-level
-`createSatelliteServer` that requires auth on every request and
-delegates valid requests to an injected handler.
+- src/memory/telemetry.ts
+- tests/memory/telemetry.test.ts
 
 ## Goal
 
-1. **`src/satellite/runtime-server.ts`** — exports:
+Add telemetry wrapping for `MemoryStore` that records counters +
+latency histograms on every operation.
+
+1. `src/memory/telemetry.ts`:
    ```ts
-   export interface SatelliteServerOptions {
-     port?: number;          // default 0 = random
-     host?: string;          // default "127.0.0.1"
-     secret: string;         // required — HMAC + bearer token
-     handler: (req: SatelliteRequest) => Promise<SatelliteResponse>;
+   export interface MemoryTelemetryOptions {
+     inner: MemoryStore;
+     metrics: Metrics;    // injected, interface-only import
+     logger?: Logger;     // optional
      now?: () => number;
    }
-   export interface RunningSatelliteServer {
-     port: number;
-     stop(): Promise<void>;
-   }
-   export async function createRuntimeSatelliteServer(
-     opts: SatelliteServerOptions,
-   ): Promise<RunningSatelliteServer>;
+   export function withTelemetry(opts: MemoryTelemetryOptions): MemoryStore;
    ```
-   - Uses `node:http.createServer`.
-   - On `POST /v1/satellite/request` with JSON body:
-     - Calls `requireAuth(req.headers, { secret })` — on error, 401 with JSON `{error: "unauthorized"}`.
-     - Parses body with `decodeRequest` from `protocol.ts`.
-     - Calls `handler(parsed)`, awaits response.
-     - Writes `encodeResponse(response)` as body.
-   - On any other method/path, 404.
-   - On parse error, 400 with the error.
-2. **`tests/satellite/runtime-server.test.ts`** — uses `node:http` +
-   global `fetch`:
-   - Starts the server with a stub handler that echoes the payload.
-   - POSTs a valid request with correct HMAC headers; asserts 200 and
-     response round-trips.
-   - POSTs without auth; asserts 401.
-   - POSTs with wrong secret; asserts 401.
-   - POSTs to unknown path; asserts 404.
-   - POSTs invalid JSON; asserts 400.
-   - Stops the server; asserts port is freed.
+   - Returns a MemoryStore wrapper.
+   - Every method increments `memory.op.total` with a `op` label
+     (get/set/list/append/query/close).
+   - Every method observes `memory.op.latency_ms` with the same `op` label.
+   - On error: `memory.op.errors` counter, plus `logger.error("memory.op.error", ...)` if logger provided.
+   - All events flow through — never swallow errors, always rethrow.
+2. `tests/memory/telemetry.test.ts`:
+   - Wrap an in-memory fake MemoryStore.
+   - Call each method, assert counters/histograms via
+     `metrics.snapshot()`.
+   - Verify error propagation: inner throws → telemetry wrapper
+     counts error + rethrows.
+   - Verify close() increments + is idempotent.
 
 ## Constraints
 
-- Do NOT touch `src/satellite/server.ts`, `client.ts`, `protocol.ts`,
-  `types.ts`, `auth.ts`, `index.ts`. New file only.
-- Node built-ins only.
+- `import type` for `MemoryStore`, `Metrics`, `Logger`.
+- Do NOT touch `src/memory/**` other than the new file.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

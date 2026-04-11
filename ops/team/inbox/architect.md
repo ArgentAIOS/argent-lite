@@ -1,24 +1,24 @@
-# Task 015 — architect
+# Task 016 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: phase4-roadmap
-Branch: codex/phase4-roadmap (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/phase4-roadmap.md
+Slice: multi-agent-design
+Branch: codex/multi-agent-design (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/multi-agent-design.md
 
 ## Goal
 
-`ops/projects/phase4-roadmap.md` (≤120 lines): rough roadmap for
-Phase 4 work beyond the Phase 3 gate. Cover:
+`ops/projects/multi-agent-design.md` (≤150 lines): the design for
+multi-agent fan-out — running N concurrent agents on the Pi.
 
-1. Deferred items from `phase3-complete.md` — what should land first.
-2. **Satellite runtime wiring**: how the Pi acts as a satellite of a
-   Mac Argent brain, using the HTTP protocol + HMAC auth from PR #31.
-3. **Multi-agent fan-out**: scheduler + topology upgrades to run N
-   concurrent agents.
-4. **Real Hailo integration**: replace the stub once the HAT+ 2 lands.
-5. **Retention telemetry**: surface memory store metrics via obs-metrics.
-6. **Channel file-watch**: the second concrete channel after stdio + http.
-7. Proposed slice order with dependencies.
-8. Risks + open questions.
+1. Agent lifecycle extension: concurrent `start()` vs serialized.
+2. Resource budget: per-agent maxConcurrentRouterCalls, wall-clock cap.
+3. Scheduler upgrades: a `maxConcurrent` ceiling on active agents, task
+   priority respect.
+4. Cross-agent message delivery (broadcast, targeted, reply-to).
+5. Failure isolation: one agent crashing must not break others.
+6. Candidate files: `src/scheduler/multi.ts` (new), updates to
+   `src/scheduler/scheduler.ts`.
+7. Test strategy: deterministic fake-clock tests, no flaky sleeps.
+8. Phased sub-slices and dependencies.
 
 SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.

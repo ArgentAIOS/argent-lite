@@ -1,13 +1,13 @@
-# Task 015 — reviewer
+# Task 016 — reviewer
 
 Single pass, outbox only. NO commit. NO PR.
 
 Branches:
-- codex/phase4-roadmap
-- codex/ci-run-verify
-- codex/satellite-server-wiring
-- codex/hailo-provider-real
+- codex/multi-agent-design
+- codex/channel-file-watch
+- codex/memory-telemetry
+- codex/scheduler-concurrent
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle15-review
+Slice: cycle16-review
 Deadline: ≤5 minutes.
