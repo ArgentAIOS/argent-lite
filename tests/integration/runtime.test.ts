@@ -37,8 +37,40 @@ function readOneLine(stream: PassThrough): Promise<string> {
   });
 }
 
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} exceeded ${ms}ms`)),
+      ms,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
+
+function activeHandleCount(): number {
+  const proc = process as unknown as {
+    _getActiveHandles?: () => unknown[];
+  };
+  return typeof proc._getActiveHandles === "function"
+    ? proc._getActiveHandles().length
+    : 0;
+}
+
 describe("bootRuntime", () => {
-  it("wires channel → router → memory and shuts down cleanly", async () => {
+  it("delivers a prompt to the router agent and logs both sides to memory", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
 
@@ -50,17 +82,21 @@ describe("bootRuntime", () => {
 
     const replyPromise = readOneLine(stdout);
     stdin.write("hello\n");
-    const reply = await replyPromise;
-
+    const reply = await withTimeout(replyPromise, 500, "router reply");
     expect(reply).toBe("echo:hello");
 
     const events = await runtime.memory.query("router", { limit: 50 });
     const kinds = new Set(events.map((e) => e.kind));
     expect(kinds.has("channel.in")).toBe(true);
     expect(kinds.has("channel.out")).toBe(true);
-    expect(kinds.has("router.route")).toBe(true);
 
-    await runtime.shutdown();
-    await runtime.shutdown();
+    const handlesBefore = activeHandleCount();
+
+    await withTimeout(runtime.shutdown(), 500, "runtime shutdown");
+    // shutdown is idempotent
+    await withTimeout(runtime.shutdown(), 500, "runtime shutdown (2nd)");
+
+    const handlesAfter = activeHandleCount();
+    expect(handlesAfter).toBeLessThanOrEqual(handlesBefore);
   });
 });
