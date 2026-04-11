@@ -50,6 +50,17 @@ describe("event-kinds vocabulary", () => {
     }
   });
 
+  it("rejects the pre-lock draft kinds router.route and router.error (2026-04-11 reconcile)", () => {
+    expect(isEventKind("router.route")).toBe(false);
+    expect(isEventKind("router.error")).toBe(false);
+    expect(() => assertEventKind("router.route")).toThrow(
+      /invalid event kind: router\.route/,
+    );
+    expect(() => assertEventKind("router.error")).toThrow(
+      /invalid event kind: router\.error/,
+    );
+  });
+
   it("EVENT_KINDS is frozen at runtime", () => {
     expect(Object.isFrozen(EVENT_KINDS)).toBe(true);
     const arr = EVENT_KINDS as unknown as string[];

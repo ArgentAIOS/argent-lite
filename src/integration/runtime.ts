@@ -41,8 +41,9 @@ export interface Runtime {
 const ALLOWED_EVENT_KINDS: ReadonlySet<string> = new Set([
   "channel.in",
   "channel.out",
-  "router.route",
-  "router.error",
+  "router.in",
+  "router.out",
+  "agent.error",
 ]);
 
 type EventKindAssertion = (kind: string) => void;
