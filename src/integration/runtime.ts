@@ -191,7 +191,6 @@ export async function bootRuntime(
     },
   };
   scheduler.register(schedulable);
-  const runPromise = agent.start();
 
   const channel = new CliStdioChannel({
     agentId: "router",
@@ -243,6 +242,13 @@ export async function bootRuntime(
       target,
       payload: msg.payload,
     });
+    if (target === agent.id) {
+      void Promise.resolve(agent.onMessage(msg)).catch((err: unknown) => {
+        logger.error("runtime.agent.onMessage", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   });
 
   const unsubOut = bus.subscribe("cli", (msg: AgentMessage) => {
@@ -263,15 +269,7 @@ export async function bootRuntime(
       unsubIn();
       unsubOut();
       await channel.stop();
-      if (agent.state === "running" || agent.state === "suspended") {
-        try {
-          agent.stop();
-        } catch {
-          // state drifted — ignore
-        }
-      }
       abortController.abort();
-      await runPromise.catch(() => undefined);
       await scheduler.stop();
       await memory.close();
     })();
