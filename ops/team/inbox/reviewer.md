@@ -1,110 +1,77 @@
-# Task 003 — reviewer
+# Task 004 — reviewer
 
 Contract: ops/contracts/reviewer.contract.md
 Runbooks: ops/runbooks/maintainer-gate.md, ops/runbooks/pr-workflow.md
-Slice: phase1-review
-Branch: codex/phase1-review (in worktree /home/jason/code/argent-lite-review)
+Slice: cycle4-review
+Branch: codex/phase1-review (worktree /home/jason/code/argent-lite-review — reuse)
 Surface: read-only everywhere except ops/team/outbox/reviewer.md.
 
 ## Context
 
-Operator approved Phase 1 of the Argent Lite scope decision on
-2026-04-11 and authorized autonomous multi-agent execution. Four other
-agents are implementing phase 1 in parallel on child branches:
+Cycle 3 Phase 1 landed successfully (38/38 tests green, PRs #1-#4 all
+merged). Cycle 4 is now running four new slices in parallel:
 
 | Role | Branch | Slice |
 | --- | --- | --- |
-| architect | codex/cli-scaffold | cli-scaffold (design + CLI skeleton) |
-| engineer-floor | codex/project-floor | project-floor (package.json, tsconfig, vitest) |
-| engineer-auth | codex/provider-auth | provider-auth (src/auth/**) |
-| engineer-router | codex/model-router-lite | model-router-lite (src/router/**, src/providers/**) |
+| architect | codex/agent-topology-lite | agent-topology-lite (Phase 2 planning) |
+| engineer-floor | codex/ci-harness | CI workflow + e2e integration test |
+| engineer-auth | codex/satellite-protocol-stub | satellite client/server protocol |
+| engineer-router | codex/hailo-provider-stub | Hailo provider stub + router health |
 
-## Goal
+## Goal — ONE SINGLE PASS (not a loop)
 
-Continuously review the other four slices as their commits land. You
-are **read-only** on source — your output is a single markdown file at
-`ops/team/outbox/reviewer.md` that gets OVERWRITTEN each review pass.
-
-### Review pass format (overwrite outbox each pass)
+Run exactly ONE review pass and write the result to
+`ops/team/outbox/reviewer.md` using the format below. DO NOT loop.
+DO NOT sleep. Threadmaster will relaunch you on the next cycle.
 
 ```
 I have read ops/ and am operating under contract:
 ops/contracts/reviewer.contract.md.
 
-## Review pass <N> — <ISO timestamp>
+## Review pass — cycle-4 — <ISO timestamp>
 
-### Branch status
-- codex/project-floor     : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
-- codex/provider-auth     : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
-- codex/model-router-lite : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
-- codex/cli-scaffold      : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
+### Branch commit check
+- codex/agent-topology-lite    : <latest commit sha + subject, or NO-COMMITS>
+- codex/ci-harness             : <…>
+- codex/satellite-protocol-stub: <…>
+- codex/hailo-provider-stub    : <…>
 
-### Findings (bulleted, per branch)
-- <branch>: <line-level note with file:line>
+### Integration branch baseline
+- codex/ops-team-bootstrap latest sha + pnpm test summary from the last threadmaster commit
+
+### Findings per branch
+- <branch>: <file:line note>
 
 ### Rules violated
-- <rule-file>: <branch>: <what>
+- <if any>
 
 ### Missing files
-- <path>: <branch>: <why this was required by the inbox task>
+- <per inbox task surface>
 
 ### Verdict
-OVERALL: <PASS|FAIL|BLOCKED>  (PASS only if all four branches pass)
+OVERALL: <PASS|FAIL|BLOCKED>
 ```
 
-### What to check per branch
+### How to look across worktrees
 
-**codex/project-floor**
-- `package.json` valid JSON, has the scripts listed in the engineer-floor inbox.
-- `tsconfig.json` is strict, ESM, Node 22 target.
-- `vitest.config.ts` is ESM-shaped.
-- `src/index.ts` and `tests/smoke.test.ts` exist.
-- Report whether `pnpm install && pnpm check && pnpm test && pnpm build` succeed (run them in the review worktree if package.json exists there).
-
-**codex/provider-auth**
-- Seven files at the exact paths in the engineer-auth inbox.
-- No `any`, no `@ts-ignore`, no `as unknown as`.
-- `file-backend.ts` uses AES-256-GCM from Node's `crypto`.
-- No new dependencies added (grep the branch for `package.json` diff).
-- Tests use `os.tmpdir()`, not hard-coded paths.
-
-**codex/model-router-lite**
-- Twelve files at the exact paths in the engineer-router inbox.
-- No import of `src/auth/` (must be injected).
-- No new dependencies.
-- Tests mock `fetch`, not real network.
-
-**codex/cli-scaffold**
-- `ops/projects/phase1-design.md` is one page (≤150 lines).
-- `src/cli/index.ts` ≤60 lines.
-- `src/config/mode.ts` ≤80 lines.
-- `tests/cli/smoke.test.ts` has real assertions.
-
-### Polling cadence
-
-Every review pass, run:
+Each worktree holds exactly one cycle-4 branch. Run:
 
 ```bash
-git -C /home/jason/code/argent-lite-floor    log -1 --format='%h %s' || echo "NO-COMMITS"
-git -C /home/jason/code/argent-lite-auth     log -1 --format='%h %s' || echo "NO-COMMITS"
-git -C /home/jason/code/argent-lite-router   log -1 --format='%h %s' || echo "NO-COMMITS"
-git -C /home/jason/code/argent-lite-cli      log -1 --format='%h %s' || echo "NO-COMMITS"
+for wt in cli floor auth router; do
+  echo "=== $wt ==="
+  git -C /home/jason/code/argent-lite-$wt log --oneline -3
+done
 ```
 
-Then run the validation commands in each branch's worktree. Then
-overwrite `ops/team/outbox/reviewer.md` with the latest review pass.
-Sleep 120 seconds between passes. Run until all four branches PASS or
-the threadmaster sends a new inbox task. Do NOT merge — merging is a
-threadmaster action.
+And verify the cycle-4 branch name matches what the threadmaster
+dispatched (see inbox files).
 
 ## Acceptance criterion
 
-- `ops/team/outbox/reviewer.md` reflects the most recent review pass
-  with the format above.
-- No file outside `ops/team/outbox/reviewer.md` is modified.
-- At least three review passes are recorded before you report BLOCKED
-  or stop.
+- `ops/team/outbox/reviewer.md` contains exactly one review pass in
+  the format above, then exits. Do not loop.
+- No files modified outside `ops/team/outbox/reviewer.md`.
 
 ## Deadline
 
-Runs continuously until threadmaster issues a new task.
+Run once, write the file, exit. ≤5 minutes.

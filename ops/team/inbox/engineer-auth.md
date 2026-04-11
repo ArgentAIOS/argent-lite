@@ -1,94 +1,92 @@
-# Task 003 — engineer-auth
+# Task 004 — engineer-auth
 
-Contract: ops/contracts/engineer-auth.contract.md (symlink to engineer.contract.md)
+Contract: ops/contracts/engineer-auth.contract.md
 Runbooks: ops/runbooks/slice-management.md, ops/runbooks/dev-workflow.md
-Slice: provider-auth
-Branch: codex/provider-auth (in worktree /home/jason/code/argent-lite-auth)
+Slice: satellite-protocol-stub
+Branch: codex/satellite-protocol-stub (worktree /home/jason/code/argent-lite-auth — reuse)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-auth.md
-- src/auth/index.ts                         (create)
-- src/auth/credential-store.ts              (create)
-- src/auth/file-backend.ts                  (create)
-- src/auth/env-backend.ts                   (create)
-- src/auth/types.ts                         (create)
-- tests/auth/credential-store.test.ts       (create)
-- tests/auth/file-backend.test.ts           (create)
+- src/satellite/index.ts                    (create)
+- src/satellite/client.ts                   (create)
+- src/satellite/server.ts                   (create)
+- src/satellite/protocol.ts                 (create)
+- src/satellite/types.ts                    (create)
+- tests/satellite/client.test.ts            (create)
+- tests/satellite/protocol.test.ts          (create)
 
 ## Context
 
-Operator approved Phase 1 on 2026-04-11. Standalone mode requires a
-credential store that can hold API keys for cloud providers (Anthropic,
-OpenAI, Ollama local). The store is greenfield — nothing to port from
-argentos-core. Design it for a Pi with no TPM and no system keyring
-daemon. Support two backends: encrypted file at
-`~/.argent-lite/credentials.json.enc` and env-var passthrough
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+Phase 1 CLI has a **satellite mode stub** that emits a warning and
+falls through to standalone. Your job is to implement the first real
+layer: a client↔server protocol between the Pi (Lite) and a Mac
+(primary Argent brain). This slice implements **transport + framing**
+only. Semantics (intent dispatch, memory sync) come later.
 
 ## Goal
 
-Implement a minimal credential store with the following shape:
+Minimal HTTP-based protocol on Node built-ins:
 
 ```ts
-export interface CredentialStore {
-  get(providerId: string): Promise<string | undefined>;
-  set(providerId: string, secret: string): Promise<void>;
-  list(): Promise<string[]>;
-  remove(providerId: string): Promise<void>;
+// types.ts
+export interface SatelliteRequest {
+  id: string;                // uuid v4
+  kind: "completion" | "health" | "ping";
+  payload: unknown;
+  ts: number;
+}
+
+export interface SatelliteResponse {
+  id: string;                // echoes request id
+  ok: boolean;
+  payload?: unknown;
+  error?: string;
 }
 ```
 
-1. `src/auth/types.ts` — exports `CredentialStore`, `ProviderId`, and a
-   `CredentialBackend` discriminated union (`"file" | "env"`).
-2. `src/auth/env-backend.ts` — reads from `process.env` using a static
-   map `ProviderId -> EnvVarName`. `set`/`remove` throw
-   `UnsupportedOperationError` (env vars are read-only at runtime).
-3. `src/auth/file-backend.ts` — AES-256-GCM encrypted JSON file at
-   `~/.argent-lite/credentials.json.enc`. Master key comes from
-   `ARGENT_MASTER_KEY` env var; if missing, throw a helpful error
-   explaining how to set it. Use only Node's built-in `crypto`. No
-   third-party deps.
-4. `src/auth/credential-store.ts` — factory `createCredentialStore(opts)`
-   that returns a `CredentialStore` backed by the chosen backend.
-   Defaults to `env` for safety.
-5. `src/auth/index.ts` — re-exports the public surface.
-6. Tests (vitest):
-   - `credential-store.test.ts`: creates a store, round-trips a value,
-     lists providers, removes one. Uses env backend with mocked
-     `process.env`.
-   - `file-backend.test.ts`: round-trips through a temp file in
-     `os.tmpdir()`, verifies the file on disk is not plaintext (grep
-     for the secret string should not find it), and confirms a wrong
-     master key throws.
+1. `src/satellite/types.ts` — types above.
+2. `src/satellite/protocol.ts` — pure functions:
+   `encodeRequest(req): string`, `decodeRequest(s): SatelliteRequest`,
+   same for response. Validates shape before returning. Throws
+   `SatelliteProtocolError` on bad input.
+3. `src/satellite/client.ts` — `SatelliteClient` class. Constructor:
+   `{ macBaseUrl: string, authToken?: string }`. Methods:
+   `ping(): Promise<boolean>`, `complete(payload): Promise<unknown>`.
+   Uses Node's built-in `fetch` with 5-second timeout via
+   `AbortController`. Retries once on network error.
+4. `src/satellite/server.ts` — `createSatelliteServer(opts)` returns a
+   bare `http.Server` that handles `POST /v1/satellite/request`, parses
+   via `protocol.decodeRequest`, returns a canned response for each
+   kind. This is the **local stub** — in satellite mode the Pi acts as
+   server too, so the Mac can push commands back. Secondary role.
+5. `src/satellite/index.ts` — re-exports the public surface.
+6. Tests:
+   - `protocol.test.ts` — round-trip encode/decode, malformed input
+     throws `SatelliteProtocolError`, extra fields preserved.
+   - `client.test.ts` — mocks global `fetch`, asserts URL + headers,
+     asserts retry on first failure then success, asserts timeout
+     triggers via `AbortController`.
 
 ## Constraints
 
-- Node built-ins only. No new dependencies in `package.json`. The
-  `package.json` is owned by engineer-floor on a different branch; you
-  cannot edit it.
-- All code must typecheck under the `tsconfig.json` that engineer-floor
-  produces (strict, ESM, Node 22). If your branch doesn't have
-  `tsconfig.json` yet, write the code to be strict-compatible anyway;
-  the reviewer will validate after integration.
-- Do not touch `src/router/`, `src/providers/`, `src/cli/`, or
-  `src/config/` — those are other engineers' slices.
+- Node built-ins only. No express, no axios, no ws.
+- Do NOT touch `src/auth/**` — that's complete. If you need auth
+  headers, take them as constructor opts, do not import.
+- Do NOT touch `src/router/**`, `src/cli/**`, `src/config/**`.
+- Strict TypeScript. ESM. `.js` import specifiers.
 
 ## Acceptance criterion
 
-- All seven files exist at the paths above.
-- Type-safe: no `any`, no `@ts-ignore`, no `as unknown as`.
-- Tests are written and runnable (you don't need pnpm test to succeed
-  on your branch if engineer-floor hasn't landed yet — but the tests
-  must be syntactically valid and free of obvious logic errors).
-- `ops/team/outbox/engineer-auth.md` contains confirmation line, files
-  touched, commits (SHAs), and a note on whether tests were run.
+- All 7 files exist.
+- No `any`, no `@ts-ignore`, no new dependencies.
+- Tests contain real assertions.
+- `ops/team/outbox/engineer-auth.md` has confirmation line, files
+  touched, line counts, and notes on any blockers.
 
 ## Validation commands
 
-- `node --check src/auth/*.ts 2>&1 || true` — TS files won't parse with
-  `node --check`; instead run `ls` to confirm existence and count lines.
-- `wc -l src/auth/*.ts tests/auth/*.ts` — report line counts.
-- If `package.json` exists in your worktree (after rebase): `pnpm test`.
+- `ls src/satellite/ tests/satellite/`
+- `wc -l src/satellite/*.ts tests/satellite/*.ts`
 
 ## Deadline
 
-Before the next operator check-in (target: 30–45 minutes).
+Before the next cron tick.

@@ -1,79 +1,71 @@
-# Task 003 — architect
+# Task 004 — architect
 
 Contract: ops/contracts/architect.contract.md
 Runbooks: ops/runbooks/research-planning.md, ops/runbooks/slice-management.md
-Slice: cli-scaffold (design-with-authorized-scaffold)
-Branch: codex/cli-scaffold (in worktree /home/jason/code/argent-lite-cli)
+Slice: agent-topology-lite (research/planning slice — Phase 2)
+Branch: codex/agent-topology-lite (worktree /home/jason/code/argent-lite-cli — reuse)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/architect.md
-- ops/projects/phase1-design.md            (create)
-- src/cli/README.md                         (create — design doc only, no code)
-- src/config/README.md                      (create — design doc only, no code)
-- src/cli/index.ts                          (create — thin entrypoint ≤60 lines)
-- src/config/mode.ts                        (create — runtime mode type + loader ≤80 lines)
-- tests/cli/smoke.test.ts                   (create — boot smoke test)
+- ops/projects/agent-topology-lite.md            (create)
 
 ## Context
 
-Operator approved Phase 1 of the scope decision on 2026-04-11. Phase 1
-ships a headless CLI that accepts a prompt, routes it through the model
-router, and returns a response. Two runtime modes (satellite, standalone)
-are config-driven. The other engineers are implementing the router and
-auth in parallel; your job is the glue: the CLI entrypoint and the
-runtime mode config — plus a one-page design doc that ties Phase 1
-interfaces together.
+Phase 1 is live on `codex/ops-team-bootstrap` (see ops/slices/REGISTRY.md).
+The operator greenlit autonomous execution of the full port. The scope
+decision names `agent-topology-lite` as the **Phase 2 gate**: nothing in
+Phase 3 (memory-lite, intent-routing-lite, channels-lite) can be opened
+until the topology is designed.
 
 ## Goal
 
-1. Write `ops/projects/phase1-design.md` — one page, covering:
-   - The four public interfaces (Router, Provider, CredentialStore, CliCommand)
-     as TypeScript-ish signatures. No implementation, just shape.
-   - How satellite vs standalone modes differ at the config level.
-   - The wiring diagram: CLI → Router → Provider (local | cloud).
-   - Acceptance criteria Phase 1 must meet before merge.
-2. Create `src/cli/index.ts` — a thin `main()` that parses argv, loads
-   runtime mode, constructs router (import from `src/router`), sends the
-   prompt, prints response, exits 0. ≤60 lines. Import-only; the router
-   and providers are implemented by other engineers on parallel branches
-   and will merge later. Use type imports only where needed; guard the
-   router import so `pnpm test` passes even if `src/router` is a stub.
-3. Create `src/config/mode.ts` — exports a `RuntimeMode` union
-   (`"satellite" | "standalone"`) and a `loadMode()` function that reads
-   `ARGENT_MODE` env var (default `"standalone"`) and validates. ≤80 lines.
-4. Create `src/cli/README.md` and `src/config/README.md` — one paragraph
-   each describing the module's role and its public surface.
-5. Create `tests/cli/smoke.test.ts` — imports `loadMode` and asserts
-   default is `"standalone"` and that `"satellite"` round-trips. Must
-   pass under vitest.
+Produce a one-page planning document at
+`ops/projects/agent-topology-lite.md` following the
+`ops/runbooks/research-planning.md` §9 shape. It should answer:
+
+1. **What is the minimum viable agent model for Argent Lite on a Pi 5 + Hailo-10H?**
+   - How many concurrent agents?
+   - What scheduler (event loop, worker_threads, child processes, cron)?
+   - How are agents isolated (memory limits, timeouts, crash recovery)?
+   - How does an agent consume the ModelRouter that Phase 1 shipped?
+2. **How does the topology differ between satellite and standalone modes?**
+   - In satellite mode, which agents run locally on the Pi vs. delegate to Mac?
+   - In standalone mode, what is the full local set?
+3. **What's the contract between agents?** Message shape, delivery
+   guarantees (best-effort? at-least-once?), transport (in-proc EventEmitter? SQLite queue?).
+4. **Candidate file areas** under `src/agents/` and `src/scheduler/`.
+5. **Phase 3 unblock:** what must be true about the topology before
+   memory-lite and intent-routing-lite can be opened?
+
+### Required sections
+
+- Decision summary (≤3 sentences)
+- Scope (IN / OUT / DEFER tables)
+- Explicit non-goals
+- Candidate file areas (one-line purpose each)
+- Phased execution order for Phase 2 sub-slices
+- Acceptance criteria
+- Open questions
+
+### Out of scope for this document
+
+- Implementation code (this is a planning slice).
+- Hailo-specific details beyond "an agent may request a local-first
+  route and the router handles provider selection."
+- Memory layer design — that's memory-lite's job.
 
 ## Acceptance criterion
 
-- `ops/projects/phase1-design.md` exists and is one page (~150 lines max).
-- `src/cli/index.ts`, `src/config/mode.ts` exist and typecheck under the
-  `tsconfig.json` that engineer-floor is producing on `codex/project-floor`.
-- `tests/cli/smoke.test.ts` passes when run via `pnpm test` after
-  project-floor lands.
-- `ops/team/outbox/architect.md` has the confirmation line and standard
-  output shape.
+- `ops/projects/agent-topology-lite.md` exists and is ≤200 lines.
+- `ops/team/outbox/architect.md` has the confirmation line and the
+  standard output shape (summary, rationale citing rules/runbooks,
+  risks/non-goals, recommended follow-on slices, files touched).
 - No files touched outside the authorized surface.
-
-## Coordination
-
-- engineer-floor owns `package.json`, `tsconfig.json`, `vitest.config.ts`.
-  Your test file will be executed by their config.
-- engineer-auth owns `src/auth/**`.
-- engineer-router owns `src/router/**` and `src/providers/**`.
-- If your CLI needs a router import, use a type-only import or a dynamic
-  import guarded behind a try/catch so your branch builds standalone.
 
 ## Validation commands
 
-- `ls src/cli/index.ts src/config/mode.ts ops/projects/phase1-design.md`
-- `wc -l src/cli/index.ts src/config/mode.ts` (report the counts)
-
-Do not run `pnpm test` — that is engineer-floor and reviewer's job after
-integration.
+- `wc -l ops/projects/agent-topology-lite.md` — report the count.
+- `ls ops/projects/` — confirm the file landed.
 
 ## Deadline
 
-Before the next operator check-in (target: 30–45 minutes).
+Before the next cron tick (5 minutes).

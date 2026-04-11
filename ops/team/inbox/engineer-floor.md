@@ -1,75 +1,66 @@
-# Task 003 — engineer-floor
+# Task 004 — engineer-floor
 
-Contract: ops/contracts/engineer-floor.contract.md (symlink to engineer.contract.md)
+Contract: ops/contracts/engineer-floor.contract.md
 Runbooks: ops/runbooks/slice-management.md, ops/runbooks/dev-workflow.md
-Slice: project-floor
-Branch: codex/project-floor (in worktree /home/jason/code/argent-lite-floor)
+Slice: ci-harness
+Branch: codex/ci-harness (worktree /home/jason/code/argent-lite-floor — reuse)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-floor.md
-- package.json                  (create)
-- pnpm-workspace.yaml           (create, minimal)
-- tsconfig.json                 (create)
-- vitest.config.ts              (create)
-- .eslintrc.cjs                 (create, minimal)
-- .prettierrc.json              (create, minimal)
-- .gitignore                    (add node_modules, dist, coverage)
-- src/index.ts                  (create — library entrypoint, exports public API surface placeholders)
-- tests/smoke.test.ts           (create — sanity test that vitest runs)
+- .github/workflows/ci.yml                  (create or update)
+- scripts/check-ci-health.sh                (reuse existing stub — update to real check)
+- tests/integration/cli-e2e.test.ts         (create)
+- src/integration/README.md                 (create, 1 paragraph)
 
 ## Context
 
-Operator approved Phase 1 on 2026-04-11. The repo is greenfield: no
-`package.json`, no tooling. Your job is to lay the project floor so the
-other engineers can build and test their slices.
+Phase 1 is live on codex/ops-team-bootstrap with 38/38 unit tests.
+Missing: a CI workflow that runs `pnpm install && pnpm check && pnpm
+test && pnpm build` on every push, and an end-to-end integration test
+that actually boots the CLI and asserts something from it.
 
 ## Goal
 
-1. Initialize a TypeScript + Node 22 project with pnpm:
-   - `name`: `@argentaios/argent-lite`
-   - `private`: true
-   - `type`: `"module"`
-   - `packageManager`: `pnpm@10.33.0`
-   - `scripts`: `build` (tsc), `test` (vitest run), `test:watch`,
-     `check` (tsc --noEmit), `lint` (eslint), `format` (prettier -w),
-     `start` (node --loader tsx/esm src/cli/index.ts)
-   - `dependencies`: none yet (engineers add their own on their slices).
-   - `devDependencies`: typescript ^5.6, vitest ^2.1, @types/node ^22,
-     tsx ^4.19, eslint ^9, @typescript-eslint/eslint-plugin ^8,
-     @typescript-eslint/parser ^8, prettier ^3.3
-2. `tsconfig.json`: strict, ESM, Node 22 target, moduleResolution `bundler`,
-   rootDir `.`, outDir `dist`, include `src/**/*`, `tests/**/*`.
-3. `vitest.config.ts`: ESM-friendly, globals enabled, include `tests/**/*.test.ts`.
-4. `src/index.ts`: re-exports stub for public API. Create an empty
-   `export {}` statement and a header comment explaining this is the
-   library entrypoint for Argent Lite.
-5. `tests/smoke.test.ts`: imports `src/index.ts`, asserts `true === true`.
-   Must pass under `pnpm test`.
-6. Run the validation commands below and report real exit codes.
+1. **GitHub Actions workflow** at `.github/workflows/ci.yml`:
+   - Triggers on `push` to any branch and `pull_request` targeting
+     `main`, `develop`, or `codex/**`.
+   - Runs on `ubuntu-latest` (Pi self-hosted runner can come later).
+   - Node 22, pnpm 10.33.0 via corepack.
+   - Steps: checkout → setup-node → `pnpm install --frozen-lockfile` →
+     `pnpm check` → `pnpm test` → `pnpm build`.
+   - Cache pnpm store by lockfile hash.
+2. **Upgrade `scripts/check-ci-health.sh`** from the stub into a real
+   script that runs `gh run list --limit 5 --json status,conclusion,name`
+   and prints a compact table with status emoji. Still accepts
+   `--auto-issue` but leaves it as a stub for now.
+3. **End-to-end integration test** at `tests/integration/cli-e2e.test.ts`:
+   - Spawns `node dist/src/cli/index.js "ping"` as a child process.
+   - Mocks the network somehow OR sets `ARGENT_MODE=standalone` and
+     accepts that the test will only run if `ollama` is reachable at
+     `localhost:11434`. If ollama is down, the test should SKIP, not FAIL.
+   - Asserts non-zero exit is 3 (router failed) and zero exit emits
+     something to stdout.
+   - Register this test under a new Vitest config include path so it
+     only runs when explicitly requested (`pnpm test:integration`).
+4. Add `test:integration` script to package.json pointing at `vitest run tests/integration`.
+5. Short README at `src/integration/README.md` explaining the folder.
 
 ## Acceptance criterion
 
-- `pnpm install` completes without network errors.
-- `pnpm check` passes (exit 0).
-- `pnpm test` passes with at least one test (exit 0).
-- `pnpm build` produces a `dist/` folder (exit 0).
-- `ops/team/outbox/engineer-floor.md` has the confirmation line, files
-  touched, commits (short SHAs), and every validation command with its
-  real exit code.
+- `.github/workflows/ci.yml` lints cleanly (`yamllint` or
+  `python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml"))'`).
+- `pnpm test` still passes 38/38 on the integration branch after
+  rebasing this slice (threadmaster will rebase).
+- `pnpm test:integration` exists and runs (can be skipped if ollama is
+  down — skip is acceptable, failure is not).
+- `ops/team/outbox/engineer-floor.md` has confirmation line, files
+  touched, real validation exit codes.
 
 ## Validation commands
 
-- `pnpm install`                    — expect 0
-- `pnpm check`                      — expect 0
-- `pnpm test`                       — expect 0
-- `pnpm build`                      — expect 0
-- `pnpm lint`                       — expect 0 or 1; report real code
-
-If `pnpm install` fails due to offline registry, try `pnpm install
---prefer-offline`. If it still fails, report BLOCKED with the real
-network error and stop — do not hand-write node_modules.
+- `python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml"))'`
+- `pnpm test` — 38/38 expected
+- `bash scripts/check-ci-health.sh` — should print a table or "no runs"
 
 ## Deadline
 
-Before the next operator check-in (target: 30–45 minutes). Other
-engineers are blocked on your `package.json` and `tsconfig.json`; this
-slice is the critical path.
+Before the next cron tick.

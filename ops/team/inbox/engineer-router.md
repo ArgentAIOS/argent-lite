@@ -1,115 +1,79 @@
-# Task 003 — engineer-router
+# Task 004 — engineer-router
 
-Contract: ops/contracts/engineer-router.contract.md (symlink to engineer.contract.md)
+Contract: ops/contracts/engineer-router.contract.md
 Runbooks: ops/runbooks/slice-management.md, ops/runbooks/dev-workflow.md
-Slice: model-router-lite
-Branch: codex/model-router-lite (in worktree /home/jason/code/argent-lite-router)
+Slice: hailo-provider-stub
+Branch: codex/hailo-provider-stub (worktree /home/jason/code/argent-lite-router — reuse)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-router.md
-- src/router/index.ts                       (create)
-- src/router/router.ts                      (create)
-- src/router/policy.ts                      (create)
-- src/router/types.ts                       (create)
-- src/providers/index.ts                    (create)
-- src/providers/provider.ts                 (create — interface only)
-- src/providers/ollama.ts                   (create — local backend)
-- src/providers/anthropic.ts                (create — cloud backend)
-- src/providers/openai.ts                   (create — cloud backend)
-- tests/router/router.test.ts               (create)
-- tests/router/policy.test.ts               (create)
-- tests/providers/ollama.test.ts            (create)
+- src/providers/hailo.ts                    (create)
+- src/providers/hailo-capabilities.ts       (create)
+- tests/providers/hailo.test.ts             (create)
+- src/router/health.ts                      (create)
+- tests/router/health.test.ts               (create)
 
 ## Context
 
-Operator approved Phase 1 on 2026-04-11. The model router is the
-backbone of Phase 1: it accepts a request and dispatches it to a local
-LLM (ollama) or a cloud provider (Anthropic, OpenAI). Routing is policy-
-driven. The auth/credential store is implemented in parallel by
-engineer-auth on `codex/provider-auth` — you'll integrate after both
-branches land.
+Phase 1 shipped three providers (ollama, anthropic, openai). The
+Raspberry Pi AI HAT+ 2 with Hailo-10H arrives 2026-04-12 — we need a
+provider stub ready so the router can swap in Hailo acceleration on
+day one without touching the router code. Also: the router currently
+has no health endpoint, so the CLI can't report which providers are
+live.
 
 ## Goal
 
-Implement a provider-agnostic router and three provider adapters.
-
-```ts
-export interface CompletionRequest {
-  prompt: string;
-  model?: string;
-  maxTokens?: number;
-  temperature?: number;
-}
-
-export interface CompletionResponse {
-  text: string;
-  model: string;
-  providerId: string;
-  usage?: { promptTokens: number; completionTokens: number };
-}
-
-export interface Provider {
-  id: string;
-  kind: "local" | "cloud";
-  complete(req: CompletionRequest): Promise<CompletionResponse>;
-  healthCheck(): Promise<boolean>;
-}
-
-export interface Router {
-  route(req: CompletionRequest): Promise<CompletionResponse>;
-  register(provider: Provider): void;
-}
-```
-
-1. `src/router/types.ts` — exports the types above and a
-   `RoutePolicy` type (`"local-first" | "cloud-first" | "cost" | "manual"`).
-2. `src/router/policy.ts` — pure functions that pick a provider from a
-   list given a `RoutePolicy` and optional request hints. No side effects.
-3. `src/router/router.ts` — class `ModelRouter` implementing `Router`.
-   Constructor takes an initial policy. `register(provider)` adds to an
-   internal Map. `route(req)` picks via policy, falls back to next provider
-   on failure (retry budget: 2), rethrows if all fail.
-4. `src/router/index.ts` — re-exports the public surface and a
-   `createRouter(opts)` factory.
-5. `src/providers/provider.ts` — just the `Provider` interface re-export.
-6. `src/providers/ollama.ts` — calls `http://localhost:11434/api/generate`
-   via Node's built-in `fetch`. Model defaults to `gemma3:1b`. No deps.
-7. `src/providers/anthropic.ts` — POST to
-   `https://api.anthropic.com/v1/messages`, reads API key via a `getKey`
-   callback (injected — does NOT import `src/auth`; the CLI wires them
-   together). Model defaults to `claude-haiku-4-5-20251001`.
-8. `src/providers/openai.ts` — POST to
-   `https://api.openai.com/v1/chat/completions`, same pattern, model
-   defaults to `gpt-4o-mini`.
-9. `src/providers/index.ts` — re-exports.
-10. Tests:
-    - `router.test.ts` — registers two mock providers, asserts routing
-      picks the right one per policy, asserts fallback on failure.
-    - `policy.test.ts` — pure-function tests for each policy branch.
-    - `ollama.test.ts` — mocks `fetch` and asserts the request URL and
-      body shape. Does NOT actually hit localhost.
+1. **`src/providers/hailo.ts`** — `HailoProvider` class implementing
+   the `Provider` interface from `src/router/types.ts`.
+   - `id: "hailo"`, `kind: "local"`.
+   - Constructor: `{ modelPath: string, socketPath?: string }`.
+     Default `socketPath = "/var/run/hailort.sock"`.
+   - `complete(req)` → for now, throws
+     `HailoUnavailableError("HailoProvider: Hailo-10H not yet
+     initialized")`. This is the stub. The error is typed so the
+     router can catch and fall through.
+   - `healthCheck()` → returns `false` until a real implementation
+     lands.
+   - Export `HailoUnavailableError`.
+2. **`src/providers/hailo-capabilities.ts`** — exports a static
+   capability map: a `const HAILO_MODELS: Record<string, { contextLen:
+   number; quant: string; source: string }>` listing the GenAI Model
+   Zoo `.hef` models we expect to support (e.g. `llama3-8b-q4`,
+   `gemma2-2b-q4`). Source: reference the Pudding Entertainment guide
+   URL as a comment. No runtime behavior.
+3. **`src/router/health.ts`** — `routerHealth(router)` function that
+   calls `healthCheck()` on every registered provider in parallel and
+   returns `{ providerId, healthy, latencyMs }[]`. Pure-ish — takes a
+   clock function as an optional arg for test injection.
+4. **Tests:**
+   - `tests/providers/hailo.test.ts`: asserts `complete()` throws
+     `HailoUnavailableError`, `healthCheck()` returns false,
+     `id === "hailo"`, `kind === "local"`.
+   - `tests/router/health.test.ts`: registers two mock providers (one
+     healthy, one throwing), asserts `routerHealth` returns both with
+     correct `healthy` flags and measured `latencyMs`.
 
 ## Constraints
 
-- No new dependencies. Node built-ins only (`fetch` is global on Node 22).
-- Do not `import` from `src/auth/` — auth is injected. Wiring happens
-  later in the CLI.
-- Do not touch `src/cli/`, `src/config/`, `src/auth/`, or `package.json`.
-- Strict TypeScript, ESM, no `any`.
+- Do NOT touch `src/auth/**`, `src/cli/**`, `src/config/**`,
+  `src/satellite/**` (engineer-auth's cycle-4 slice).
+- Do NOT add dependencies.
+- Strict TypeScript. ESM. `.js` specifiers.
+- Do NOT import real `hailo` or `hailort` packages — none are on the
+  npm registry and the hardware isn't live yet.
 
 ## Acceptance criterion
 
-- All 12 files exist at the paths above.
-- `ollama.test.ts`, `router.test.ts`, `policy.test.ts` contain real
-  assertions — no `expect(true).toBe(true)` placeholders.
+- All 5 files exist.
+- Tests have real assertions.
 - `ops/team/outbox/engineer-router.md` has confirmation line, files
-  touched, commits (SHAs), and note on whether tests ran.
+  touched, line counts.
 
 ## Validation commands
 
-- `ls src/router/ src/providers/ tests/router/ tests/providers/`
-- `wc -l src/router/*.ts src/providers/*.ts` — report line counts.
-- If `package.json` exists in your worktree: `pnpm test -- tests/router tests/providers`.
+- `ls src/providers/hailo* src/router/health.ts tests/providers/hailo.test.ts tests/router/health.test.ts`
+- `wc -l src/providers/hailo*.ts src/router/health.ts tests/providers/hailo.test.ts tests/router/health.test.ts`
 
 ## Deadline
 
-Before the next operator check-in (target: 45–60 minutes).
+Before the next cron tick.
