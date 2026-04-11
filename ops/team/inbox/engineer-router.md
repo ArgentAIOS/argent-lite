@@ -1,49 +1,46 @@
-# Task 017 — engineer-router
+# Task 018 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: router-cost-policy
-Branch: codex/router-cost-policy (worktree /home/jason/code/argent-lite-router)
+Slice: router-rate-limit
+Branch: codex/router-rate-limit (worktree /home/jason/code/argent-lite-router)
 Surface:
 - ops/team/outbox/engineer-router.md
-- src/router/cost-policy.ts
-- tests/router/cost-policy.test.ts
+- src/router/rate-limit.ts
+- tests/router/rate-limit.test.ts
 
 ## Goal
 
-Implement a concrete cost-aware routing strategy. Today
-`selectProviders` has a `"cost"` enum value but no implementation.
+Add a token-bucket rate limiter wrapper around `Router.route` so the
+Pi doesn't hammer cloud providers.
 
-1. **`src/router/cost-policy.ts`**:
+1. **`src/router/rate-limit.ts`**:
    ```ts
-   export interface ProviderCost {
-     providerId: string;
-     costPerToken: number;  // USD per output token, 0 for local
-     latencyMsP50: number;  // rough p50 observed
+   export interface RateLimitOptions {
+     inner: Router;
+     tokensPerSec: number;
+     burst: number;           // bucket capacity
+     now?: () => number;
    }
-   export interface CostPolicyOptions {
-     costs: ProviderCost[];
-     maxTokensBudget?: number;   // skip if prompt exceeds
-     preferLocal?: boolean;      // default true — break ties in favor of cost=0
+   export class RateLimitedError extends Error {
+     readonly retryAfterMs: number;
+     constructor(retryAfterMs: number);
    }
-   export function selectByCost(
-     providers: Provider[],
-     policy: CostPolicyOptions,
-   ): Provider[];
+   export function withRateLimit(opts: RateLimitOptions): Router;
    ```
-   - Returns a sorted list of providers by (cost asc, latency asc),
-     filtered to providers present in both lists.
-   - `preferLocal` means all cost-0 providers come first.
-2. **`tests/router/cost-policy.test.ts`**:
-   - 3 providers with different costs → sorted ascending.
-   - Tiebreaker on latency.
-   - `preferLocal` puts cost-0 first even if latency worse.
-   - Empty providers → empty output.
-   - Missing cost entry → provider omitted.
+   - Token bucket refills at `tokensPerSec`, cap at `burst`.
+   - `route()` tries to consume 1 token; if none, throws
+     `RateLimitedError` with a computed `retryAfterMs`.
+   - `register(p)` delegates untouched.
+2. **`tests/router/rate-limit.test.ts`** — inject a fake `now`:
+   - Burst of 3 → 3 successful routes, 4th throws.
+   - After advancing time by `1000/tokensPerSec`, next call succeeds.
+   - Sustained burst at exact rate never throws.
+   - `retryAfterMs` is non-negative and decreasing as time advances.
 
 ## Constraints
 
-- Do NOT touch `src/router/policy.ts`, `router.ts`, `types.ts` — new file only.
-- `import type` for `Provider` from `./types.js`.
+- Do NOT touch existing router files.
+- Pure functional clock via injected `now`.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

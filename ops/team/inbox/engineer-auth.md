@@ -1,48 +1,60 @@
-# Task 017 — engineer-auth
+# Task 018 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: credential-rotation
-Branch: codex/credential-rotation (worktree /home/jason/code/argent-lite-auth)
+Slice: satellite-client-wiring
+Branch: codex/satellite-client-wiring (worktree /home/jason/code/argent-lite-auth)
 Surface:
 - ops/team/outbox/engineer-auth.md
-- src/auth/rotation.ts
-- tests/auth/rotation.test.ts
+- src/satellite/runtime-client.ts
+- tests/satellite/runtime-client.test.ts
+
+## Context
+
+Cycle-15 added `createRuntimeSatelliteServer` with HMAC auth. Now the
+matching client: a wrapper that signs outgoing requests to a satellite
+server and handles retries.
 
 ## Goal
 
-Add credential rotation support to the `CredentialStore` interface.
-
-1. **`src/auth/rotation.ts`**:
+1. **`src/satellite/runtime-client.ts`**:
    ```ts
-   export interface RotationOptions {
-     inner: CredentialStore;
+   export interface SatelliteClientOptions {
+     baseUrl: string;        // http://mac-host:port
+     secret: string;         // shared HMAC secret
+     timeoutMs?: number;     // default 10000
+     retries?: number;       // default 1
      now?: () => number;
-     maxAgeMs?: number;   // default 30 days
+     fetchImpl?: typeof fetch;  // injected for tests
    }
-   export interface RotatingCredentialStore extends CredentialStore {
-     lastRotated(providerId: string): Promise<number | undefined>;
-     stale(providerId: string, maxAgeMs?: number): Promise<boolean>;
-     markRotated(providerId: string): Promise<void>;
+   export interface RuntimeSatelliteClient {
+     request(req: SatelliteRequest): Promise<SatelliteResponse>;
+     ping(): Promise<boolean>;
    }
-   export function withRotation(opts: RotationOptions): RotatingCredentialStore;
+   export function createRuntimeSatelliteClient(
+     opts: SatelliteClientOptions,
+   ): RuntimeSatelliteClient;
    ```
-   - Wraps an existing store, layers a rotation timestamp on top.
-   - Timestamps are stored as `${providerId}:rotated-at` keys via the
-     inner store's `set`/`get` so persistence is automatic.
-   - `stale()` returns true if no rotation timestamp exists or if
-     `now() - lastRotated > maxAgeMs`.
-2. **`tests/auth/rotation.test.ts`**:
-   - Start with an in-memory fake `CredentialStore` (build a minimal
-     one in the test file; do NOT touch src/auth/**).
-   - `set(provider, secret)` → rotation timestamp exists afterward.
-   - `stale()` returns true for a provider never rotated.
-   - `stale()` returns false immediately after rotation.
-   - `stale()` returns true after simulated time passes via injected `now`.
-   - `markRotated()` resets the timestamp.
+   - `request()`:
+     - Serializes via `encodeRequest` (from `protocol.ts`).
+     - Computes HMAC via `hmacSign` (from `auth.ts`).
+     - Sends `POST ${baseUrl}/v1/satellite/request` with
+       `Authorization: Bearer ${secret}` and `x-satellite-sig: ${sig}`.
+     - Parses reply via `decodeResponse`.
+     - Retries on network error or 5xx, up to `retries` times.
+     - Times out via `AbortController` after `timeoutMs`.
+   - `ping()` sends a `kind: "ping"` request, returns true on 2xx.
+2. **`tests/satellite/runtime-client.test.ts`** — inject `fetchImpl`:
+   - Valid request round-trip.
+   - Retries on network error.
+   - Gives up after `retries` exhausted.
+   - Timeout triggers AbortController.
+   - Auth headers present.
+   - `ping()` returns true on 2xx, false on 5xx.
 
 ## Constraints
 
-- Do NOT touch existing `src/auth/**` files. Add only `rotation.ts`.
+- Import-only from `src/satellite/{protocol,auth,types}.js`. Do NOT
+  touch those files or other satellite files.
 - Node built-ins only.
 - Strict TS, no `any`.
 
