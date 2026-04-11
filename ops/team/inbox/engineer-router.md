@@ -1,89 +1,63 @@
-# Task 005 — engineer-router
+# Task 006 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Runbooks: ops/runbooks/slice-management.md, ops/runbooks/dev-workflow.md
-Slice: scheduler-skeleton
-Branch: codex/scheduler-skeleton (worktree /home/jason/code/argent-lite-router — reuse)
+Slice: context-router-bridge
+Branch: codex/context-router-bridge (worktree /home/jason/code/argent-lite-router)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-router.md
-- src/scheduler/scheduler.ts
-- src/scheduler/task-queue.ts
-- src/scheduler/types.ts
-- src/scheduler/index.ts
-- tests/scheduler/scheduler.test.ts
-- tests/scheduler/task-queue.test.ts
+- src/agents/context-with-router.ts
+- tests/agents/context-with-router.test.ts
+- src/router/default-router.ts
+- tests/router/default-router.test.ts
 
 ## Context
 
-Phase 2 is landing the agent topology. Your slice is the **scheduler
-side** of the agent contract. Engineer-auth is implementing the agent
-skeleton (`src/agents/**`) in parallel — you do NOT import from
-`src/agents/` directly; you import the types only. Architect's
-`ops/projects/agent-lifecycle-design.md` is the interface reference
-(landing this same cycle).
+Phase 2 kept agents and router intentionally decoupled. Cycle-6 adds a
+thin **optional** bridge so an agent that wants an LLM call can ask
+its `AgentContext` for a router, without the base `AgentContext`
+hard-coupling to `src/router/**`.
 
 ## Goal
 
-1. **`src/scheduler/types.ts`** — exports:
+1. **`src/agents/context-with-router.ts`** — exports:
    ```ts
-   export interface SchedulableAgent {
-     readonly id: string;
-     start(): Promise<void>;
-     stop(): Promise<void>;
-     state: "init" | "ready" | "running" | "suspended" | "stopped";
+   import type { AgentContext } from "./agent-context.js";
+   import type { Router } from "../router/index.js";
+   export interface AgentContextWithRouter extends AgentContext {
+     router: Router;
    }
-   export interface ScheduledTask {
-     id: string;
-     agentId: string;
-     runAt: number;
-     payload: unknown;
-   }
-   export interface SchedulerOptions {
-     maxConcurrent?: number;  // default 4
-     now?: () => number;
+   export function withRouter(ctx: AgentContext, router: Router): AgentContextWithRouter {
+     return { ...ctx, router };
    }
    ```
-2. **`src/scheduler/task-queue.ts`** — `TaskQueue` class. FIFO with
-   priority-by-runAt ordering. Methods: `enqueue(task)`, `dequeueDue(now)`,
-   `size()`, `peek()`. Pure data structure, no side effects.
-3. **`src/scheduler/scheduler.ts`** — `Scheduler` class:
-   - Registers `SchedulableAgent`s via `register(agent)`.
-   - `enqueue(task)` adds a scheduled task.
-   - `tick()` method pulls due tasks and dispatches to the target agent
-     (calls `agent.start()` if not running). Deterministic for testing.
-   - `maxConcurrent` limits in-flight task count; excess tasks remain
-     queued.
-   - Graceful shutdown via `stop()` that awaits in-flight tasks.
-4. **`src/scheduler/index.ts`** — re-exports.
-5. **Tests:**
-   - `task-queue.test.ts` — enqueue out-of-order, dequeue in runAt order,
-     peek, size, empty behavior.
-   - `scheduler.test.ts` — register 2 mock `SchedulableAgent`s, enqueue
-     3 tasks, `tick()` dispatches them in order, respects `maxConcurrent`,
-     `stop()` awaits in-flight.
+2. **`tests/agents/context-with-router.test.ts`** — construct a base
+   `AgentContext` (mock logger, bus, abort), wrap with a mock router,
+   assert the wrapped context has both the original fields and the router.
+3. **`src/router/default-router.ts`** — `createDefaultRouter()` factory
+   that returns a fully-wired `ModelRouter`:
+   - Policy: `"local-first"`.
+   - Registers `OllamaProvider` (always, local).
+   - Registers `AnthropicProvider` and `OpenAIProvider` with `getKey`
+     backed by an injected `CredentialStore`. Credential store is
+     **injected** as an argument (`createDefaultRouter({ credentials })`),
+     NOT imported from `src/auth/**`.
+4. **`tests/router/default-router.test.ts`** — inject a fake credential
+   store, assert the router lists 3 providers, assert `route()` fails
+   gracefully when ollama isn't reachable (mock `fetch`).
 
 ## Constraints
 
-- Do NOT import from `src/agents/**` — take the types inline in
-  `src/scheduler/types.ts` (duplication is fine for Phase 2; architect
-  will unify later).
-- Do NOT import from `src/router/**`, `src/auth/**`, `src/satellite/**`.
-- Do NOT touch `package.json`.
-- Node built-ins only.
+- Do NOT import from `src/auth/**` directly. Credential store is injected.
+- Do NOT touch `src/agents/base-agent.ts`, `src/agents/agent-context.ts`,
+  `src/agents/message-bus.ts` — those are engineer-auth's territory.
 - Strict TS, ESM `.js` specifiers, no `any`.
 
 ## Acceptance criterion
 
-- 4 src files + 2 test files exist.
-- `pnpm check` and `pnpm test tests/scheduler/` pass.
-- SELF-COMMIT, PUSH, `gh pr create --base codex/ops-team-bootstrap --head codex/scheduler-skeleton`.
-
-## Validation
-
-- `pnpm check`
-- `pnpm test tests/scheduler/`
-- `wc -l src/scheduler/*.ts tests/scheduler/*.ts`
+- 4 files created.
+- `pnpm check` and `pnpm test tests/agents/context-with-router tests/router/default-router` pass.
+- SELF-COMMIT, PUSH, `gh pr create --base codex/ops-team-bootstrap --head codex/context-router-bridge`.
 
 ## Deadline
 
-Before the next cron tick.
+Before next cron tick.

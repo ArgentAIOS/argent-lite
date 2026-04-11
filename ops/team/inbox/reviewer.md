@@ -1,42 +1,46 @@
-# Task 005 — reviewer
+# Task 006 — reviewer
 
 Contract: ops/contracts/reviewer.contract.md
-Runbooks: ops/runbooks/maintainer-gate.md, ops/runbooks/pr-workflow.md
-Slice: cycle5-review
-Branch: codex/phase1-review (worktree /home/jason/code/argent-lite-review — reuse, reset to latest)
-Surface: read-only everywhere except ops/team/outbox/reviewer.md.
+Slice: cycle6-review
+Branch: codex/phase1-review (worktree /home/jason/code/argent-lite-review)
+Surface: read-only except ops/team/outbox/reviewer.md.
 
 ## Context
 
-Cycle-4 is integrated and shipped (ba63bec, 59/59 tests green, 4 PRs
-merged). Cycle-5 is now running four new slices in parallel:
+Cycle-5 integrated at `9373530` (78/78 tests). Cycle-6 runs 4 new
+slices in parallel:
 
 | Role | Branch | Slice |
 | --- | --- | --- |
-| architect | codex/agent-lifecycle-design | Phase 2 interface contract |
-| engineer-floor | codex/ci-live | verify + nightly CI |
-| engineer-auth | codex/agent-skeleton | src/agents/** base + bus |
-| engineer-router | codex/scheduler-skeleton | src/scheduler/** |
+| architect | codex/memory-lite-design | Phase 3 memory design |
+| engineer-floor | codex/demo-runner | end-to-end demo runner |
+| engineer-auth | codex/agent-helloagent | HelloAgent proof |
+| engineer-router | codex/context-router-bridge | agents ↔ router wiring |
 
 ## Goal — ONE single pass, then exit
 
-Run exactly ONE review pass and overwrite
-`ops/team/outbox/reviewer.md` with the format below. Do NOT loop.
+**Do not commit a PR for your review outbox** — previous cycle
+accidentally opened PR #12. Write only to
+`ops/team/outbox/reviewer.md` in your worktree and let threadmaster
+read it directly. Do NOT run `git add/commit/push` for the review
+outbox. Do NOT run `gh pr create`.
+
+Single pass format:
 
 ```
 I have read ops/ and am operating under contract:
 ops/contracts/reviewer.contract.md.
 
-## Review pass — cycle-5 — <ISO timestamp>
+## Review pass — cycle-6 — <ISO timestamp>
 
 ### Branch commit check
-- codex/agent-lifecycle-design  : <sha + subject, or NO-COMMITS>
-- codex/ci-live                 : <…>
-- codex/agent-skeleton          : <…>
-- codex/scheduler-skeleton      : <…>
+- codex/memory-lite-design    : <sha or NO-COMMITS>
+- codex/demo-runner           : <sha or NO-COMMITS>
+- codex/agent-helloagent      : <sha or NO-COMMITS>
+- codex/context-router-bridge : <sha or NO-COMMITS>
 
-### Test status (per branch worktree)
-- <branch>: <pnpm test result or SKIPPED because>
+### Test status
+- <branch>: <pnpm test result or SKIPPED>
 
 ### Findings per branch
 - <file:line note>
@@ -51,15 +55,11 @@ ops/contracts/reviewer.contract.md.
 OVERALL: <PASS|FAIL|BLOCKED>
 ```
 
-For each branch worktree, run `pnpm check && pnpm test` where
-`package.json` exists and report real exit codes.
-
 ## Acceptance criterion
 
-- Single review pass committed to `ops/team/outbox/reviewer.md`.
-- No files modified outside that path.
-- Run once and exit — the launcher wraps you in a loop but your task
-  should still be a single pass per invocation.
+- Review pass overwrites `ops/team/outbox/reviewer.md` in your worktree.
+- NO git commit, NO PR.
+- Run once and exit.
 
 ## Deadline
 
