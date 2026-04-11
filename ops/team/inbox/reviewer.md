@@ -1,13 +1,13 @@
-# Task 011 — reviewer
+# Task 012 — reviewer
 
 Single pass, outbox only, NO git commit, NO PR.
 
 Branches:
-- codex/phase3-acceptance
-- codex/instrumented-cli
-- codex/intent-router-impl
-- codex/memory-observed-router
+- codex/event-kind-lock
+- codex/phase3-e2e-test
+- codex/agent-context-memory
+- codex/phase3-runtime-slice
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle11-review
+Slice: cycle12-review
 Deadline: ≤5 minutes.

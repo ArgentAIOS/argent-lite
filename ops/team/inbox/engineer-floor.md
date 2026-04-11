@@ -1,36 +1,62 @@
-# Task 011 — engineer-floor
+# Task 012 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: instrumented-cli
-Branch: codex/instrumented-cli (worktree /home/jason/code/argent-lite-floor)
-Surface:
+Slice: phase3-e2e-test
+Branch: codex/phase3-e2e-test (worktree /home/jason/code/argent-lite-floor)
+Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-floor.md
-- src/cli/instrumented-main.ts
-- tests/cli/instrumented-main.test.ts
+- tests/integration/cli-chat.test.ts
+- tests/integration/stub-provider.ts
+- tests/integration/README.md
+
+## Context
+
+`ops/projects/phase3-acceptance.md` §4 requires an integration-only
+test that drives the chat path with a stub provider, no real network,
+and asserts the correct event-kind writes + clean SIGINT teardown.
 
 ## Goal
 
-Wire cycle-9's `createLogger` + `createMetrics` + cycle-9's
-`instrumentRouter` into a new CLI entrypoint that records every route
-call.
+Write the Phase 3 e2e test harness that other cycle-12 slices
+(`agent-context-memory` on codex/agent-context-memory and
+`phase3-runtime-slice` on codex/phase3-runtime-slice) will slot into.
 
-1. `src/cli/instrumented-main.ts` — `instrumentedMain(argv, opts?)`:
-   - Creates `createLogger({level: "info"})` and `createMetrics()`.
-   - Creates the default router via `createDefaultRouter({credentials})`.
-   - Wraps it with `instrumentRouter({ inner: router, metrics, logger })`.
-   - Reads the prompt from argv, routes it, prints result to stdout.
-   - On exit, logs a final line with `metrics.snapshot()` summary
-     (just counts + p50/p95 for router.route.latency_ms).
-   - Returns a numeric exit code.
-2. `tests/cli/instrumented-main.test.ts` — inject a mock router via an
-   optional `routerOverride` option so tests don't hit network. Assert
-   the logger captured a "router.route" line and metrics recorded 1
-   success counter.
+1. **`tests/integration/stub-provider.ts`** — a `Provider`
+   implementation with `id: "stub"`, `kind: "local"`:
+   - `complete(req)` → returns `{ text: "stub reply: " + req.prompt, model: "stub-1", providerId: "stub" }`.
+   - `healthCheck()` → returns `true`.
+2. **`tests/integration/cli-chat.test.ts`** — vitest, included under
+   the `vitest.integration.config.ts` that engineer-floor's cycle-4
+   slice already created. Skeleton:
+   - imports `bootRuntime` from `../../src/integration/runtime.js`
+     **dynamically** with a try/catch so this test SKIPS if the
+     runtime seam isn't merged yet.
+   - uses `stream.PassThrough` for stdin and stdout.
+   - boots runtime with `{ providers: [new StubProvider()], memoryPath: tmpdir, now }`.
+   - writes `"hello"` to stdin, waits for a line on stdout, asserts it starts with `"stub reply:"`.
+   - calls `runtime.shutdown()` and asserts the promise resolves within 500ms.
+   - asserts `memory.query("channel")` returns at least one `channel.in`
+     and one `router.out` event using only the locked vocabulary.
+   - asserts `process._getActiveHandles?.().length` is 0 (or unchanged
+     from baseline) after shutdown.
+3. **`tests/integration/README.md`** — one paragraph on how to run the
+   harness (`pnpm test:integration`).
 
 ## Constraints
 
-- Do NOT touch `src/cli/index.ts` — this is a separate entrypoint.
-- Inject logger/metrics/router for tests.
+- Do NOT touch `src/**`. Test-only surface.
+- Dynamic imports with try/catch so tests pass (as SKIPPED) even
+  before `bootRuntime` lands.
 - Strict TS, no `any`.
 
-## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
+## Acceptance criterion
+
+- 3 files exist.
+- `pnpm test tests/integration/cli-chat.test.ts` either passes (if
+  bootRuntime has landed on the branch) or skips cleanly with a clear
+  message. Must not FAIL.
+- SELF-COMMIT, PUSH, PR.
+
+## Deadline
+
+Before next cron tick.
