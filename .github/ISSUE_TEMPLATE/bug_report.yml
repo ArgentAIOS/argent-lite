@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a defect, regression, crash, or incorrect behavior.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep every answer grounded in what you actually observed.
+        If a field cannot be answered from direct evidence, write exactly `NOT_ENOUGH_INFO`.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing what is broken based only on observed evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide the shortest deterministic repro path you actually observed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: macOS 15.4 / Ubuntu 24.04 / Windows 11 / Docker
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and frequency
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, and evidence
+      render: shell
+    validations:
+      required: true
