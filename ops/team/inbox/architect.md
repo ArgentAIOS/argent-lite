@@ -1,22 +1,21 @@
-# Task 010 — architect
+# Task 011 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: intent-routing-design
-Branch: codex/intent-routing-design (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/intent-routing-design.md
+Slice: phase3-acceptance
+Branch: codex/phase3-acceptance (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/phase3-acceptance.md
 
 ## Goal
 
-`ops/projects/intent-routing-design.md` (≤150 lines, §9 shape): how
-does Argent Lite decide which agent handles an incoming channel message?
+Write `ops/projects/phase3-acceptance.md` (≤150 lines): **Phase 3 done-definition**.
+Given Phase 3 is ~60% implemented, list:
 
-1. Intent model — what is an "intent" (string kind + payload schema).
-2. Routing strategies: static (channel → agent), keyword-based,
-   LLM-classified (uses router).
-3. Registry: `IntentRouter` interface — `register(intent, handler)`, `dispatch(msg) → agentId`.
-4. Fallback + conflict resolution.
-5. Candidate files: `src/intents/**`.
-6. Integration with channels (how channel output becomes intent dispatch).
-7. Acceptance criteria + phased sub-slices.
+1. What's SHIPPED (with PR numbers).
+2. What's MISSING before Phase 3 can be marked complete.
+3. A concrete acceptance smoke test: a bash one-liner that exercises
+   channel → intent → agent → router → memory end-to-end.
+4. Remaining sub-slices ordered by dependency.
+5. Rough time estimate in cycles.
+6. Sign-off criteria the operator needs.
 
 SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.

@@ -1,45 +1,36 @@
-# Task 010 — engineer-floor
+# Task 011 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: channel-http
-Branch: codex/channel-http (worktree /home/jason/code/argent-lite-floor)
+Slice: instrumented-cli
+Branch: codex/instrumented-cli (worktree /home/jason/code/argent-lite-floor)
 Surface:
 - ops/team/outbox/engineer-floor.md
-- src/channels/http.ts
-- tests/channels/http.test.ts
+- src/cli/instrumented-main.ts
+- tests/cli/instrumented-main.test.ts
 
 ## Goal
 
-Second concrete channel: HTTP POST endpoint. Accepts prompts, delivers
-to an agent over the bus, returns the completion.
+Wire cycle-9's `createLogger` + `createMetrics` + cycle-9's
+`instrumentRouter` into a new CLI entrypoint that records every route
+call.
 
-1. `src/channels/http.ts` — `HttpChannel` implementing the `Channel`
-   interface from `src/channels/types.ts`:
-   - Constructor: `{ agentId, bus, port?: number, host?: string }`.
-   - `start()` — creates `http.Server` on `port` (default 0 = random),
-     handles `POST /v1/prompt` with JSON body `{prompt: string}`.
-   - Delivers prompt to bus, awaits reply with same `trace_id`, writes
-     JSON response.
-   - 10-second timeout via `AbortController`; returns 504 on timeout.
-   - `stop()` closes the server.
-   - `port` getter after `start()` so tests can grab the chosen port.
-2. `tests/channels/http.test.ts`:
-   - Start the channel on port 0, get actual port, POST to `/v1/prompt`
-     via Node `fetch`, fake a bus reply, assert JSON response.
-   - Test 404 on unknown path.
-   - Test 400 on bad body.
-   - Test 504 on no reply within timeout (use short timeout + stub bus
-     that never replies).
+1. `src/cli/instrumented-main.ts` — `instrumentedMain(argv, opts?)`:
+   - Creates `createLogger({level: "info"})` and `createMetrics()`.
+   - Creates the default router via `createDefaultRouter({credentials})`.
+   - Wraps it with `instrumentRouter({ inner: router, metrics, logger })`.
+   - Reads the prompt from argv, routes it, prints result to stdout.
+   - On exit, logs a final line with `metrics.snapshot()` summary
+     (just counts + p50/p95 for router.route.latency_ms).
+   - Returns a numeric exit code.
+2. `tests/cli/instrumented-main.test.ts` — inject a mock router via an
+   optional `routerOverride` option so tests don't hit network. Assert
+   the logger captured a "router.route" line and metrics recorded 1
+   success counter.
 
 ## Constraints
 
-- Node built-ins only (`node:http`).
-- Do NOT touch other subsystems.
+- Do NOT touch `src/cli/index.ts` — this is a separate entrypoint.
+- Inject logger/metrics/router for tests.
 - Strict TS, no `any`.
 
-## Acceptance criterion
-
-- 2 files, pnpm check + pnpm test tests/channels/http.test.ts pass.
-- SELF-COMMIT, PUSH, PR.
-
-## Deadline: before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

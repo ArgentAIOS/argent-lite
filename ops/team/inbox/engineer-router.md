@@ -1,39 +1,45 @@
-# Task 010 — engineer-router
+# Task 011 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: agent-trace-context
-Branch: codex/agent-trace-context (worktree /home/jason/code/argent-lite-router)
+Slice: memory-observed-router
+Branch: codex/memory-observed-router (worktree /home/jason/code/argent-lite-router)
 Surface:
 - ops/team/outbox/engineer-router.md
-- src/agents/trace-context.ts
-- tests/agents/trace-context.test.ts
+- src/router/memory-router.ts
+- tests/router/memory-router.test.ts
 
 ## Goal
 
-Trace ID propagation across channel → bus → agent → router.
+A router wrapper that persists every route call to a `MemoryStore` as
+an event, so the system has a complete audit trail of LLM traffic.
 
-1. `src/agents/trace-context.ts`:
-   - `newTraceId(): string` — 16-byte hex random via `node:crypto.randomBytes`.
-   - `TRACE_HEADER = "trace_id"`.
-   - `getTraceId(msg: AgentMessage): string | undefined` — reads `msg.payload` if payload is an object with a `trace_id` string, otherwise undefined.
-   - `stampTrace<T extends object>(payload: T, traceId: string): T & { trace_id: string }`.
-   - `withTracedRoute(router, now?)` — returns a wrapped `Router` whose
-     `route(req)` accepts an optional `traceId`, logs via a provided
-     `Logger` interface (injected, optional), and adds a
-     `x-argent-trace-id` header to the request (no change to router, just pass-through).
-     Actually: since we don't want to modify router signatures, keep
-     this function minimal — just expose the helpers; the wiring happens
-     in a later slice.
-2. `tests/agents/trace-context.test.ts`:
-   - `newTraceId()` returns 32 hex chars, unique across calls
-   - `stampTrace` adds the field without mutating input
-   - `getTraceId` returns the id if present, undefined if not, undefined if malformed
-   - 100 trace IDs → all unique
+1. `src/router/memory-router.ts`:
+   ```ts
+   export interface MemoryRouterOptions {
+     inner: Router;
+     memory: MemoryStore;  // injected
+     agentId?: string;     // default "router"
+     now?: () => number;
+   }
+   export function withMemoryLog(opts: MemoryRouterOptions): Router;
+   ```
+   - Delegates `register(p)` and `route(req)` to inner.
+   - On each `route()`, after success, calls
+     `memory.append(agentId, {id, ts, kind: "router.route", payload: {req, providerId, model}})`.
+   - On failure, appends `{kind: "router.error", payload: {req, error: msg}}`.
+   - Memory errors must NOT break routing — swallow + swallow log via
+     an optional injected `logger` (interface import only).
+2. `tests/router/memory-router.test.ts`:
+   - Mock `inner` returning a canned response; mock `memory` as object
+     with `append = vi.fn()`. Verify append called with right shape.
+   - Mock `inner` that throws; verify error event appended.
+   - Mock `memory.append` that throws; verify routing still succeeds
+     (swallowed).
 
 ## Constraints
 
-- Do NOT touch router, bus, agents base files.
-- Node built-ins only.
+- `import type` for `MemoryStore` from `../memory/types.js`.
+- Do NOT touch ModelRouter, instrumented-router, memory/**, etc.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

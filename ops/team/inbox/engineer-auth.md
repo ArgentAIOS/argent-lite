@@ -1,46 +1,50 @@
-# Task 010 — engineer-auth
+# Task 011 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: satellite-auth-hardening
-Branch: codex/satellite-auth-hardening (worktree /home/jason/code/argent-lite-auth)
+Slice: intent-router-impl
+Branch: codex/intent-router-impl (worktree /home/jason/code/argent-lite-auth)
 Surface:
 - ops/team/outbox/engineer-auth.md
-- src/satellite/auth.ts
-- tests/satellite/auth.test.ts
+- src/intents/router.ts
+- src/intents/types.ts
+- src/intents/index.ts
+- tests/intents/router.test.ts
 
 ## Context
 
-Cycle-4 landed satellite-protocol-stub (PR #7) with optional bearer
-auth. Before satellite mode can be exposed off-box, auth MUST be
-mandatory.
+Cycle-10 PR #33 designed the intent router. Implement it.
 
 ## Goal
 
-1. `src/satellite/auth.ts`:
-   - `hmacSign(body: string, secret: string): string` — HMAC-SHA256 of
-     body, returns hex.
-   - `verifyHmac(body: string, secret: string, signature: string): boolean`
-     — constant-time comparison via `crypto.timingSafeEqual`.
-   - `SatelliteAuthError` class.
-   - `requireAuth(req, opts: { secret: string }): void` — reads the
-     `authorization` header (`Bearer <token>`) and `x-satellite-sig`
-     header, verifies token equals `opts.secret` and sig is valid for
-     the body. Throws `SatelliteAuthError` on any failure.
-2. `tests/satellite/auth.test.ts`:
-   - HMAC round-trip with fixed body/secret → stable hex
-   - `verifyHmac` returns true on match, false on mismatch
-   - `requireAuth` passes on valid headers
-   - Missing authorization → throws with clear message
-   - Wrong secret → throws
-   - Tampered body → throws
-   - Timing safety: compare two wrong-sigs of same length doesn't short-circuit
+1. `src/intents/types.ts`:
+   ```ts
+   export interface IntentHandler {
+     agentId: string;
+     matches(msg: unknown): boolean;
+     priority?: number;   // higher wins
+   }
+   export interface IntentRouter {
+     register(handler: IntentHandler): void;
+     dispatch(msg: unknown): string | undefined;  // agentId or undefined
+     list(): IntentHandler[];
+   }
+   ```
+2. `src/intents/router.ts` — `createIntentRouter(): IntentRouter`:
+   - Stores handlers in priority order (ties: registration order).
+   - `dispatch(msg)` iterates handlers, returns first `matches` true.
+   - `list()` returns a copy.
+3. `src/intents/index.ts` — re-exports.
+4. `tests/intents/router.test.ts`:
+   - Register 2 handlers with different matchers, dispatch to each.
+   - Priority wins: register low-pri first, high-pri second, dispatch picks high-pri.
+   - Registration-order tiebreak: equal priority → first registered wins.
+   - No match → `dispatch` returns `undefined`.
+   - `list()` returns a copy (mutations don't leak).
 
 ## Constraints
 
-- Node built-ins only (`node:crypto`).
-- Do NOT touch `src/satellite/server.ts`, `client.ts`, `protocol.ts`,
-  `types.ts`, or `index.ts`. A follow-up slice will wire `requireAuth`
-  into the server.
+- No deps. Node built-ins only.
+- Do NOT touch other subsystems.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
