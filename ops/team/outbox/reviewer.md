@@ -1,2 +1,3 @@
-I have read ops/ and am operating under contract:
-ops/contracts/reviewer.contract.md.
+# Outbox — reviewer
+
+(empty — cycle 2 dispatched, awaiting teammate response)
