@@ -1,0 +1,27 @@
+[Unit]
+Description=Argent Lite runtime (satellite/standalone)
+Documentation=https://github.com/ArgentAIOS/argent-lite
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=argent-lite
+Group=argent-lite
+WorkingDirectory=/opt/argent-lite
+ExecStart=/usr/bin/node /opt/argent-lite/dist/src/cli/chat.js
+EnvironmentFile=/etc/default/argent-lite
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/argent-lite /var/log/argent-lite
+
+[Install]
+WantedBy=multi-user.target
