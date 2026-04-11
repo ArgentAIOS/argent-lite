@@ -1,70 +1,65 @@
-# Task 004 — architect
+# Task 005 — architect
 
 Contract: ops/contracts/architect.contract.md
 Runbooks: ops/runbooks/research-planning.md, ops/runbooks/slice-management.md
-Slice: agent-topology-lite (research/planning slice — Phase 2)
-Branch: codex/agent-topology-lite (worktree /home/jason/code/argent-lite-cli — reuse)
+Slice: agent-lifecycle-design
+Branch: codex/agent-lifecycle-design (worktree /home/jason/code/argent-lite-cli — reuse)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/architect.md
-- ops/projects/agent-topology-lite.md            (create)
+- ops/projects/agent-lifecycle-design.md      (create)
 
 ## Context
 
-Phase 1 is live on `codex/ops-team-bootstrap` (see ops/slices/REGISTRY.md).
-The operator greenlit autonomous execution of the full port. The scope
-decision names `agent-topology-lite` as the **Phase 2 gate**: nothing in
-Phase 3 (memory-lite, intent-routing-lite, channels-lite) can be opened
-until the topology is designed.
+Phase 2 planning landed in `ops/projects/agent-topology-lite.md`. Your
+cycle-5 task is the next layer of detail: **how does one agent actually
+run on the Pi?** Two engineers are implementing skeletons in parallel:
+
+- engineer-auth → `src/agents/**` (BaseAgent, AgentContext, lifecycle hooks)
+- engineer-router → `src/scheduler/**` (Scheduler, TaskQueue)
+
+They need a one-page interface contract between agents and scheduler
+before they can integrate.
 
 ## Goal
 
-Produce a one-page planning document at
-`ops/projects/agent-topology-lite.md` following the
-`ops/runbooks/research-planning.md` §9 shape. It should answer:
+Write `ops/projects/agent-lifecycle-design.md` (≤150 lines) covering:
 
-1. **What is the minimum viable agent model for Argent Lite on a Pi 5 + Hailo-10H?**
-   - How many concurrent agents?
-   - What scheduler (event loop, worker_threads, child processes, cron)?
-   - How are agents isolated (memory limits, timeouts, crash recovery)?
-   - How does an agent consume the ModelRouter that Phase 1 shipped?
-2. **How does the topology differ between satellite and standalone modes?**
-   - In satellite mode, which agents run locally on the Pi vs. delegate to Mac?
-   - In standalone mode, what is the full local set?
-3. **What's the contract between agents?** Message shape, delivery
-   guarantees (best-effort? at-least-once?), transport (in-proc EventEmitter? SQLite queue?).
-4. **Candidate file areas** under `src/agents/` and `src/scheduler/`.
-5. **Phase 3 unblock:** what must be true about the topology before
-   memory-lite and intent-routing-lite can be opened?
+1. **Agent lifecycle states**: `init → ready → running → suspended → stopped`.
+   Which state transitions are legal? Which are async?
+2. **AgentContext shape**: what does the scheduler inject into an agent
+   when it starts? (logger, router, credential store, message bus handle,
+   resource limits struct).
+3. **Message bus contract**: agents send/receive messages. Transport is
+   in-proc `EventEmitter` for Phase 2. Message shape:
+   `{ id, from, to, kind, payload, ts }`. Delivery: best-effort,
+   in-order per (from, to) pair.
+4. **Scheduler API**: `register(agent)`, `start(agentId)`, `stop(agentId)`,
+   `list(): AgentDescriptor[]`. Include a `tick()` method for deterministic
+   testing.
+5. **Resource limits**: per-agent `maxMemMb`, `maxWallMs`, `maxConcurrentRouterCalls`.
+   How are they enforced? (soft warn + hard kill via `AbortController`).
+6. **Failure semantics**: what happens if an agent throws during `run()`?
+   If it blocks the event loop? If it exceeds a limit?
 
 ### Required sections
 
 - Decision summary (≤3 sentences)
-- Scope (IN / OUT / DEFER tables)
-- Explicit non-goals
-- Candidate file areas (one-line purpose each)
-- Phased execution order for Phase 2 sub-slices
-- Acceptance criteria
-- Open questions
-
-### Out of scope for this document
-
-- Implementation code (this is a planning slice).
-- Hailo-specific details beyond "an agent may request a local-first
-  route and the router handles provider selection."
-- Memory layer design — that's memory-lite's job.
+- Interface signatures (TS-ish, no implementation)
+- Sequence diagram (ASCII) showing scheduler → agent → router round-trip
+- Test acceptance criteria that engineer-auth and engineer-router must hit
+- Open questions (anything left for next round)
 
 ## Acceptance criterion
 
-- `ops/projects/agent-topology-lite.md` exists and is ≤200 lines.
-- `ops/team/outbox/architect.md` has the confirmation line and the
-  standard output shape (summary, rationale citing rules/runbooks,
-  risks/non-goals, recommended follow-on slices, files touched).
+- `ops/projects/agent-lifecycle-design.md` exists, ≤150 lines.
+- `ops/team/outbox/architect.md` has the confirmation line + standard shape.
+- You SELF-COMMIT, PUSH, and OPEN a PR via `gh pr create --base codex/ops-team-bootstrap --head codex/agent-lifecycle-design`.
 - No files touched outside the authorized surface.
 
-## Validation commands
+## Validation
 
-- `wc -l ops/projects/agent-topology-lite.md` — report the count.
-- `ls ops/projects/` — confirm the file landed.
+- `wc -l ops/projects/agent-lifecycle-design.md` — report the count.
+- `ls ops/projects/agent-lifecycle-design.md`
 
 ## Deadline
 
