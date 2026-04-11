@@ -89,9 +89,28 @@ echo "[$(date -Is)] ${ROLE} starting in $(pwd), branch=$(git rev-parse --abbrev-
 echo "--- inbox ---"
 cat "$INBOX"
 echo "--- launching claude ---"
+
+# Heartbeat: print a one-liner every 30s while claude -p runs so the
+# pane never looks frozen. Reports last-modified file, untracked count,
+# and git short status.
+(
+  while :; do
+    sleep 30
+    now=$(date +%H:%M:%S)
+    last_file=$(find . -type f -not -path './node_modules/*' -not -path './.git/*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
+    untracked=$(git status --porcelain 2>/dev/null | wc -l)
+    head=$(git rev-parse --short HEAD 2>/dev/null)
+    echo "[${ROLE} ${now}] HEAD=${head} dirty=${untracked} last=${last_file#./}"
+  done
+) &
+HB_PID=$!
+trap "kill $HB_PID 2>/dev/null || true" EXIT INT TERM
+
 claude -p "$PROMPT" \
   --permission-mode bypassPermissions \
   2>&1 | tee -a "${LOGDIR}/${ROLE}.log"
+
+kill "$HB_PID" 2>/dev/null || true
 echo "[$(date -Is)] ${ROLE} finished, outbox:"
 echo "--- outbox ---"
 cat "$OUTBOX" 2>/dev/null || echo "(outbox not written)"
