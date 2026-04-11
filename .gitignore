@@ -26,3 +26,9 @@ pnpm-debug.log*
 # Test / coverage
 coverage/
 .nyc_output/
+
+# Claude Code runtime state (session-only cron locks, etc.)
+.claude/
+
+# Team agent runtime logs (outbox history lives in commits + archive)
+ops/team/logs/

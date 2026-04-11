@@ -1,3 +1,1 @@
-# Outbox — engineer
-
-(empty — cycle 2 dispatched, awaiting teammate response)
+(cycle-2 archived; engineer role split into engineer-floor, engineer-auth, engineer-router for cycle-3 — see those outbox files)

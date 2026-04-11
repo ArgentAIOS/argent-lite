@@ -1,3 +1,1 @@
-# Outbox — reviewer
-
-(empty — cycle 2 dispatched, awaiting teammate response)
+(empty — cycle 3 dispatched, awaiting teammate response)

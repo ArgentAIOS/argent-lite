@@ -1,84 +1,110 @@
-# Task 002 — reviewer
+# Task 003 — reviewer
 
 Contract: ops/contracts/reviewer.contract.md
-Runbooks: ops/runbooks/maintainer-gate.md, ops/runbooks/research-planning.md
-Slice: ops-team-bootstrap (slice expansion)
-Branch: codex/ops-team-bootstrap
-Surface: read-only except ops/team/outbox/reviewer.md
+Runbooks: ops/runbooks/maintainer-gate.md, ops/runbooks/pr-workflow.md
+Slice: phase1-review
+Branch: codex/phase1-review (in worktree /home/jason/code/argent-lite-review)
+Surface: read-only everywhere except ops/team/outbox/reviewer.md.
+
+## Context
+
+Operator approved Phase 1 of the Argent Lite scope decision on
+2026-04-11 and authorized autonomous multi-agent execution. Four other
+agents are implementing phase 1 in parallel on child branches:
+
+| Role | Branch | Slice |
+| --- | --- | --- |
+| architect | codex/cli-scaffold | cli-scaffold (design + CLI skeleton) |
+| engineer-floor | codex/project-floor | project-floor (package.json, tsconfig, vitest) |
+| engineer-auth | codex/provider-auth | provider-auth (src/auth/**) |
+| engineer-router | codex/model-router-lite | model-router-lite (src/router/**, src/providers/**) |
 
 ## Goal
 
-Review the cycle-2 deliverables from the architect and the engineer.
+Continuously review the other four slices as their commits land. You
+are **read-only** on source — your output is a single markdown file at
+`ops/team/outbox/reviewer.md` that gets OVERWRITTEN each review pass.
 
-### Architect deliverable under review
+### Review pass format (overwrite outbox each pass)
 
-- `ops/projects/argent-lite-scope-decision.md`
-- `ops/team/outbox/architect.md` (cycle-2 version)
+```
+I have read ops/ and am operating under contract:
+ops/contracts/reviewer.contract.md.
 
-Checks:
+## Review pass <N> — <ISO timestamp>
 
-1. Does the scope-decision document match the shape required by
-   `ops/runbooks/research-planning.md` §9 (decision summary, scope,
-   non-goals, candidate file areas, phased execution order, future
-   slice breakdown, acceptance criteria, open questions)?
-2. Does the approval section at the top name exactly what ships first
-   if the operator approves?
-3. Does the phase plan have explicit dependencies between
-   follow-on slices?
-4. Is the document consistent with the cycle-1 memo at
-   `ops/team/archive/cycle-001/architect.md`, or does it quietly
-   contradict any verdict?
-5. Any dangling file references?
+### Branch status
+- codex/project-floor     : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
+- codex/provider-auth     : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
+- codex/model-router-lite : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
+- codex/cli-scaffold      : <commit sha> | <PASS|FAIL|BLOCKED|NO-COMMITS>
 
-### Engineer deliverable under review
+### Findings (bulleted, per branch)
+- <branch>: <line-level note with file:line>
 
-- `scripts/send-pr-email.sh`
-- `scripts/send-escalation-email.sh`
-- `scripts/check-ci-health.sh`
-- `ops/runbooks/dev-workflow.md` (rewritten)
-- `ops/rules/branching.md` (updated)
-- `ops/team/outbox/engineer.md` (cycle-2 version)
+### Rules violated
+- <rule-file>: <branch>: <what>
 
-Checks:
+### Missing files
+- <path>: <branch>: <why this was required by the inbox task>
 
-1. Are the three new scripts real executable bash stubs with shebang,
-   `set -euo pipefail`, structured stub logging, and header comments?
-2. Do they exit with the codes the inbox task required (0, 0, 2)?
-3. Does `dev-workflow.md` still reference
-   `argent-lite-develop-clean` or `argent-lite-main-clean` as mandatory?
-   Flag if yes.
-4. Does `branching.md` still hard-code the non-existent worktrees as
-   required? Flag if yes.
-5. Did the engineer touch any file outside the authorized surface?
-   Cross-reference the `Files Touched` list in the engineer outbox
-   against `git diff --name-only codex/ops-team-bootstrap`.
-6. Did the engineer create `package.json` or `src/` anywhere?
-   That is explicitly prohibited. Fail the review if yes.
+### Verdict
+OVERALL: <PASS|FAIL|BLOCKED>  (PASS only if all four branches pass)
+```
 
-### Verdict rules
+### What to check per branch
 
-- PASS if every check above passes and no prohibited surface is touched.
-- FAIL with line-level notes if any check fails.
-- BLOCKED if a deliverable is missing or the surface is unclear.
+**codex/project-floor**
+- `package.json` valid JSON, has the scripts listed in the engineer-floor inbox.
+- `tsconfig.json` is strict, ESM, Node 22 target.
+- `vitest.config.ts` is ESM-shaped.
+- `src/index.ts` and `tests/smoke.test.ts` exist.
+- Report whether `pnpm install && pnpm check && pnpm test && pnpm build` succeed (run them in the review worktree if package.json exists there).
+
+**codex/provider-auth**
+- Seven files at the exact paths in the engineer-auth inbox.
+- No `any`, no `@ts-ignore`, no `as unknown as`.
+- `file-backend.ts` uses AES-256-GCM from Node's `crypto`.
+- No new dependencies added (grep the branch for `package.json` diff).
+- Tests use `os.tmpdir()`, not hard-coded paths.
+
+**codex/model-router-lite**
+- Twelve files at the exact paths in the engineer-router inbox.
+- No import of `src/auth/` (must be injected).
+- No new dependencies.
+- Tests mock `fetch`, not real network.
+
+**codex/cli-scaffold**
+- `ops/projects/phase1-design.md` is one page (≤150 lines).
+- `src/cli/index.ts` ≤60 lines.
+- `src/config/mode.ts` ≤80 lines.
+- `tests/cli/smoke.test.ts` has real assertions.
+
+### Polling cadence
+
+Every review pass, run:
+
+```bash
+git -C /home/jason/code/argent-lite-floor    log -1 --format='%h %s' || echo "NO-COMMITS"
+git -C /home/jason/code/argent-lite-auth     log -1 --format='%h %s' || echo "NO-COMMITS"
+git -C /home/jason/code/argent-lite-router   log -1 --format='%h %s' || echo "NO-COMMITS"
+git -C /home/jason/code/argent-lite-cli      log -1 --format='%h %s' || echo "NO-COMMITS"
+```
+
+Then run the validation commands in each branch's worktree. Then
+overwrite `ops/team/outbox/reviewer.md` with the latest review pass.
+Sleep 120 seconds between passes. Run until all four branches PASS or
+the threadmaster sends a new inbox task. Do NOT merge — merging is a
+threadmaster action.
 
 ## Acceptance criterion
 
-`ops/team/outbox/reviewer.md` contains the confirmation line, verdict,
-findings (bulleted), missing-reference list, and rules-violated list.
-Format must match `ops/contracts/reviewer.contract.md`.
-
-## Validation commands
-
-The reviewer should run these to verify the engineer's work:
-
-- `bash -n scripts/send-pr-email.sh`
-- `bash -n scripts/send-escalation-email.sh`
-- `bash -n scripts/check-ci-health.sh`
-- `git diff --name-only` (to see the engineer's actual surface)
-- `test -f package.json && echo "PROHIBITED FILE EXISTS" || echo "ok"`
-
-Report real exit codes.
+- `ops/team/outbox/reviewer.md` reflects the most recent review pass
+  with the format above.
+- No file outside `ops/team/outbox/reviewer.md` is modified.
+- At least three review passes are recorded before you report BLOCKED
+  or stop.
 
 ## Deadline
 
-Before the next operator check-in.
+Runs continuously until threadmaster issues a new task.

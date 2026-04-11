@@ -15,9 +15,9 @@
 ## Merge Rules
 
 1. All work happens on `codex/*` or another approved implementation branch.
-2. Reconstruct and validate in the clean dev/release lane before any recommendation to merge.
+2. Validate release-facing work before any recommendation to merge.
 3. Merge release-facing implementation into `develop` first unless the owner explicitly overrides this.
-4. operator or human smoke testing happens after clean-lane validation and before `main`.
+4. Operator or human smoke testing happens after validation and before `main`.
 5. Promote `develop` to `main` only after regression testing and operator sign-off.
 6. Use fast-forward merges when possible.
 7. If fast-forward fails, rebase onto the target branch first.
@@ -25,7 +25,10 @@
 ## Worktree Rules
 
 1. Primary dev workspace: `/home/jason/code/argent-lite`
-2. Clean integration workspace: `/home/jason/code/argent-lite-develop-clean`
-3. Clean trunk workspace: `/home/jason/code/argent-lite-main-clean`
-4. Never have two worktrees on the same branch.
-5. Document every worktree in `ops/slices/REGISTRY.md`.
+2. Never have two worktrees on the same branch.
+3. Document every worktree in `ops/slices/REGISTRY.md`.
+
+**Note:** Clean-lane worktrees (`/home/jason/code/argent-lite-develop-clean`
+and `/home/jason/code/argent-lite-main-clean`) are optional for this Pi
+deploy. They can be created later if the project needs isolated clean-lane
+validation, but are not required for single-machine operation.

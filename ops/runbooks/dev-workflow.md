@@ -2,52 +2,57 @@
 
 ## Purpose
 
-Keep day-to-day development stable while preserving a clean `develop`
-lane for integration and a clean `main` lane for release validation.
+Keep day-to-day development stable while preserving a clean path from
+implementation branches through `develop` to `main`.
 
-## Canonical Working Layout
+## Prerequisites
 
-- `/home/jason/code/argent-lite`
-  - active development workspace
-  - may be dirty and in-progress
-- `/home/jason/code/argent-lite-develop-clean`
-  - clean integration and dev/release lane
-  - branch: `develop`
-  - must stay clean
-- `/home/jason/code/argent-lite-main-clean`
-  - clean trunk validation lane
-  - branch: `main`
-  - must stay clean
+If there is no `package.json` in the repo root, the validation commands in
+this runbook are inapplicable. Claim the project-floor slice and complete
+the scope decision before attempting build/test validation.
+
+## Workspace
+
+All work happens in a single workspace on the Pi:
+
+- `/home/jason/code/argent-lite` — active development, implementation
+  branches, integration, and release validation.
+
+Clean-lane worktrees (`-develop-clean`, `-main-clean`) are **optional** and
+can be created later if the project grows to need isolated validation. They
+are not required for single-machine Pi operation.
 
 ## Ground Rules
 
 1. Never do day-to-day edits directly on `main`.
 2. All code changes happen on `codex/*` branches.
-3. Threadmaster reconstructs release-facing work in a clean dev/release lane before recommending merge.
+3. Threadmaster validates release-facing work before recommending merge.
 4. Merge release-facing implementation into `develop` first.
 5. Promote `develop` to `main` only after regression testing and operator sign-off.
-6. Validate release and smoke checks from clean worktrees, not from a dirty dev tree.
 
-## Release Lane Flow
+## Release Lane Flow (single-machine)
 
-1. Implement on `codex/*`
-2. Hand off using `ops/runbooks/threadmaster-handoff.md`
-3. Threadmaster reconstructs and validates in a clean dev/release lane
-4. Merge into `develop`
-5. Build and test the dev artifact from `develop`
-6. Hand the clean lane to the operator or human for final smoke validation
-7. Record sign-off
-8. Promote the tested commit from `develop` to `main`
+1. Implement on `codex/*`.
+2. Hand off using `ops/runbooks/threadmaster-handoff.md`.
+3. Threadmaster validates on a clean checkout of `develop` (stash or commit
+   in-progress work first).
+4. Merge into `develop`.
+5. Build and test the artifact from `develop`.
+6. Operator or human performs final smoke validation.
+7. Record sign-off.
+8. Promote the tested commit from `develop` to `main`.
 
 ## Minimum Validation
 
-Run the most direct checks for the touched surface. The default baseline is:
+Run these only when `package.json` exists in the repo root:
 
 ```bash
 pnpm install
 pnpm build
 pnpm check
 pnpm test
-pnpm protocol:check
-pnpm --dir dashboard build
 ```
+
+Additional project-specific checks (e.g., `pnpm protocol:check`,
+`pnpm --dir dashboard build`) apply only when their respective targets
+exist. Do not run commands against missing directories or configs.
