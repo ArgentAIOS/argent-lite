@@ -1,73 +1,53 @@
-# Task 007 — engineer-auth
+# Task 008 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: memory-store-impl
-Branch: codex/memory-store-impl (worktree /home/jason/code/argent-lite-auth)
+Slice: memory-retention
+Branch: codex/memory-retention (worktree /home/jason/code/argent-lite-auth)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-auth.md
-- src/memory/store.ts
-- src/memory/sqlite-store.ts
-- src/memory/types.ts
-- src/memory/index.ts
-- tests/memory/store.test.ts
-- tests/memory/sqlite-store.test.ts
+- src/memory/retention.ts
+- tests/memory/retention.test.ts
 
 ## Context
 
-`ops/projects/memory-lite-design.md` (merged in cycle-6 as PR #17)
-describes a per-agent SQLite KV store + append-only event log. Your
-job is to implement it.
-
-Node 22 ships a built-in `node:sqlite` module (currently experimental).
-Use it. **Do not add better-sqlite3 or any other native dep.** If
-`node:sqlite` is gated behind a flag, gate it behind a runtime check
-and throw a clear error.
+`SqliteMemoryStore` landed in cycle-7 (PR #21). The design doc
+(`ops/projects/memory-lite-design.md`) also requires: TTL per key,
+event log cap per agent. Implement those as a **retention layer** that
+wraps a `MemoryStore` — do NOT edit `sqlite-store.ts`.
 
 ## Goal
 
-1. **`src/memory/types.ts`** — interfaces:
+1. **`src/memory/retention.ts`** — exports:
    ```ts
-   export interface MemoryStore {
-     get(agentId: string, key: string): Promise<unknown>;
-     set(agentId: string, key: string, value: unknown): Promise<void>;
-     list(agentId: string): Promise<string[]>;
-     append(agentId: string, event: MemoryEvent): Promise<void>;
-     query(agentId: string, opts?: { limit?: number; sinceTs?: number }): Promise<MemoryEvent[]>;
-     close(): Promise<void>;
+   export interface RetentionOptions {
+     keyTtlMs?: number;                 // default: unlimited
+     maxEventsPerAgent?: number;        // default: 1000
+     now?: () => number;
    }
-   export interface MemoryEvent {
-     id: string;
-     ts: number;
-     kind: string;
-     payload: unknown;
-   }
+   export function withRetention(store: MemoryStore, opts?: RetentionOptions): MemoryStore;
    ```
-2. **`src/memory/sqlite-store.ts`** — `SqliteMemoryStore` implementing
-   `MemoryStore`:
-   - Uses `node:sqlite` (import dynamically; if unavailable, throw
-     `MemoryStoreError("node:sqlite is not available; run with --experimental-sqlite on older Node")`).
-   - Schema: tables `kv(agent_id, key, value_json, updated_at)` PK
-     `(agent_id, key)`; `events(id PK, agent_id, ts, kind, payload_json)`
-     with index on `(agent_id, ts DESC)`.
-   - Serializes writes via an internal async mutex (simple promise chain).
-3. **`src/memory/store.ts`** — `createMemoryStore(opts: { path: string }): Promise<MemoryStore>` factory that opens the SQLite db and returns the store. Creates the schema on first open.
-4. **`src/memory/index.ts`** — re-exports.
-5. **Tests (vitest):**
-   - `store.test.ts` — factory opens+closes, round-trip get/set, list, append+query. Uses a temp dir (`os.tmpdir()` + `fs.mkdtempSync`). If `node:sqlite` is unavailable the test should SKIP with a clear message, not fail.
-   - `sqlite-store.test.ts` — direct test of SqliteMemoryStore with injection; covers schema creation and the async mutex (two concurrent writes don't corrupt state).
+   - `set(agent, key, value)` records the write time internally; the
+     wrapped `get` returns `undefined` (and evicts) if the key is older
+     than `keyTtlMs`.
+   - `append(agent, event)` prunes to the newest `maxEventsPerAgent`
+     after each append (call inner `query` to count, inner `close`
+     only on close).
+   - `list` filters out expired keys.
+2. **`tests/memory/retention.test.ts`** — uses an in-memory fake
+   `MemoryStore` (no sqlite dep) to verify: TTL expires, `list` hides
+   expired, event cap enforces at write time, non-expired keys survive.
 
 ## Constraints
 
-- No new dependencies in package.json.
-- Node built-ins only.
-- Strict TS, ESM `.js` specifiers, no `any`.
-- Do NOT touch `src/auth/**`, `src/agents/**`, `src/router/**`, `src/providers/**`, `src/satellite/**`, `src/cli/**`, `src/scheduler/**`, `src/config/**`, `src/demo/**`.
+- Do NOT touch `src/memory/sqlite-store.ts`, `types.ts`, `index.ts`,
+  or `store.ts`.
+- Do NOT add deps.
+- Strict TS, no `any`.
 
 ## Acceptance criterion
 
-- 6 files exist.
-- `pnpm check` passes.
-- `pnpm test tests/memory/` passes (tests may SKIP if node:sqlite absent).
+- 2 files.
+- `pnpm check` + `pnpm test tests/memory/retention.test.ts` pass.
 - SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
 ## Deadline

@@ -1,53 +1,47 @@
-# Task 007 — engineer-router
+# Task 008 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: router-agent
-Branch: codex/router-agent (worktree /home/jason/code/argent-lite-router)
+Slice: router-agent-live
+Branch: codex/router-agent-live (worktree /home/jason/code/argent-lite-router)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-router.md
-- src/agents/router-agent.ts
-- tests/agents/router-agent.test.ts
+- src/demo/e2e-runner.ts
+- tests/demo/e2e-runner.test.ts
 
 ## Context
 
-HelloAgent (cycle-6) proved the topology. Now prove the **router path**:
-a `RouterAgent` that receives a prompt over the MessageBus, calls the
-router (via `withRouter`), and replies with the completion.
+Cycle-7 landed `RouterAgent` (PR #18) with injected mock router. Now
+wire it to the **real** default router (from cycle-6 PR #15
+`createDefaultRouter`) + a real credential store (`createCredentialStore`
+from cycle-3 PR #3), boot a mini end-to-end demo.
 
 ## Goal
 
-1. **`src/agents/router-agent.ts`** — `class RouterAgent extends BaseAgent`:
-   - Constructor: `(id, ctx)`. Requires `ctx.router` to be present
-     (AgentContextWithRouter from cycle-6 context-router-bridge).
-     Throws `RouterAgentError("AgentContext missing router")` otherwise.
-   - `override onMessage(msg)`: if `msg.payload` has shape
-     `{ prompt: string }`, calls `ctx.router.route({ prompt })`, sends
-     the response back over the bus with `kind: "completion"` and
-     `payload: { text, providerId }`. On router error, replies with
-     `kind: "error"` and `payload: { message }`.
-   - `run()`: same pattern as HelloAgent — resolves on abort.
-2. **`tests/agents/router-agent.test.ts`** — mock the router:
-   ```ts
-   const router = { route: vi.fn(async () => ({ text: "mocked", model: "m", providerId: "mock" })), register: vi.fn() };
-   ```
-   Wrap a base context with `withRouter(ctx, router)`. Send a prompt
-   message to the agent over the bus. Assert the router was called
-   with `{ prompt }` and a reply was published with
-   `kind: "completion"` and `text: "mocked"`.
-   Also test the error path: router.route throws → reply kind is `error`.
+1. **`src/demo/e2e-runner.ts`** — `runE2E(opts?)` async function:
+   - Builds `MessageBus`, `AgentContext`.
+   - Creates a `CredentialStore` with env backend via `createCredentialStore({backend: "env"})`.
+   - Calls `createDefaultRouter({ credentials })` from `../router/default-router.js`.
+   - Wraps the context via `withRouter(ctx, router)`.
+   - Instantiates `RouterAgent("router", wrappedCtx)`.
+   - Registers with a `Scheduler`, enqueues a task carrying a prompt.
+   - Ticks the scheduler; sends a message to the agent over the bus;
+     awaits the reply.
+   - Returns `{ status: "ok", text }` or `{ status: "error", message }`.
+   - Accepts injected `router` override so tests can bypass network.
+2. **`tests/demo/e2e-runner.test.ts`** — injects a mock router that
+   returns `{ text: "mocked", model: "m", providerId: "mock" }`.
+   Asserts the runner boots, enqueues, routes, and returns `{ status: "ok", text: "mocked" }`.
 
 ## Constraints
 
-- Do NOT touch `src/router/**` or base `src/agents/**` files (use them as imports).
+- Do NOT touch `src/agents/**`, `src/router/**`, `src/scheduler/**`.
+- Inject credentials + router override for tests.
 - Strict TS, no `any`.
-- Import `withRouter` and `AgentContextWithRouter` from cycle-6's
-  `src/agents/context-with-router.js`.
 
 ## Acceptance criterion
 
-- 2 files exist.
-- `pnpm check` passes.
-- `pnpm test tests/agents/router-agent.test.ts` passes.
+- 2 files.
+- `pnpm check` + `pnpm test tests/demo/e2e-runner.test.ts` pass.
 - SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
 ## Deadline

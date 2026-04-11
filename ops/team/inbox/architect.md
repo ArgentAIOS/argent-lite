@@ -1,22 +1,26 @@
-# Task 007 — architect
+# Task 008 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: channels-lite-design
-Branch: codex/channels-lite-design (worktree /home/jason/code/argent-lite-cli)
+Slice: phase3-integration-plan
+Branch: codex/phase3-integration-plan (worktree /home/jason/code/argent-lite-cli)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/architect.md
-- ops/projects/channels-lite-design.md
+- ops/projects/phase3-integration-plan.md
 
 ## Goal
 
-Write `ops/projects/channels-lite-design.md` (≤150 lines, research-planning §9 shape) covering Phase 3 channels:
+Write `ops/projects/phase3-integration-plan.md` (≤150 lines): the
+concrete plan for tying the Phase 3 pieces together (memory, channels,
+agent-router wiring, CredentialStore injection). Explain:
 
-1. Channel model — what is a channel? (CLI stdin/stdout, file-tail, HTTP endpoint, eventually Slack/email).
-2. Channel ↔ agent contract — how does a channel deliver input to an agent and stream output back?
-3. Initial phase-3 channels: `cli-stdio`, `file-watch`, `http-post`.
-4. Candidate file areas: `src/channels/**`.
-5. Phased sub-slices with dependencies.
-6. Open questions (auth per channel? multi-tenant?).
+1. **Dependency graph** between memory-store, channels, router-agent-live,
+   and the existing agents + scheduler. ASCII diagram.
+2. **First runtime slice** — a single end-to-end flow: stdin → CLI channel
+   → RouterAgent → Router → Ollama → stdout, with memory-store
+   capturing the interaction.
+3. **Dogfooding plan** — what's the smoke test that proves it works?
+4. **Acceptance criteria** for the phase-3 gate.
+5. **Open questions** (retention defaults, channel auth, etc.).
 
 SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
