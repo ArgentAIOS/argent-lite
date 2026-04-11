@@ -1,55 +1,45 @@
-# Task 008 — engineer-auth
+# Task 009 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: memory-retention
-Branch: codex/memory-retention (worktree /home/jason/code/argent-lite-auth)
-Surface (WRITE authorized — nothing else):
+Slice: obs-metrics
+Branch: codex/obs-metrics (worktree /home/jason/code/argent-lite-auth)
+Surface:
 - ops/team/outbox/engineer-auth.md
-- src/memory/retention.ts
-- tests/memory/retention.test.ts
-
-## Context
-
-`SqliteMemoryStore` landed in cycle-7 (PR #21). The design doc
-(`ops/projects/memory-lite-design.md`) also requires: TTL per key,
-event log cap per agent. Implement those as a **retention layer** that
-wraps a `MemoryStore` — do NOT edit `sqlite-store.ts`.
+- src/obs/metrics.ts
+- tests/obs/metrics.test.ts
 
 ## Goal
 
-1. **`src/memory/retention.ts`** — exports:
+Phase 3 observability **metrics** layer.
+
+1. `src/obs/metrics.ts`:
    ```ts
-   export interface RetentionOptions {
-     keyTtlMs?: number;                 // default: unlimited
-     maxEventsPerAgent?: number;        // default: 1000
-     now?: () => number;
+   export interface Metrics {
+     inc(name: string, labels?: Record<string, string>, by?: number): void;
+     observe(name: string, value: number, labels?: Record<string, string>): void;
+     snapshot(): MetricsSnapshot;
    }
-   export function withRetention(store: MemoryStore, opts?: RetentionOptions): MemoryStore;
+   export interface MetricsSnapshot {
+     counters: Array<{ name: string; labels: Record<string, string>; value: number }>;
+     histograms: Array<{ name: string; labels: Record<string, string>; count: number; sum: number; p50: number; p95: number; p99: number }>;
+   }
+   export function createMetrics(): Metrics;
    ```
-   - `set(agent, key, value)` records the write time internally; the
-     wrapped `get` returns `undefined` (and evicts) if the key is older
-     than `keyTtlMs`.
-   - `append(agent, event)` prunes to the newest `maxEventsPerAgent`
-     after each append (call inner `query` to count, inner `close`
-     only on close).
-   - `list` filters out expired keys.
-2. **`tests/memory/retention.test.ts`** — uses an in-memory fake
-   `MemoryStore` (no sqlite dep) to verify: TTL expires, `list` hides
-   expired, event cap enforces at write time, non-expired keys survive.
+   - Counters: monotonic, keyed by `name + labels`.
+   - Histograms: store observations in a bounded ring (cap 1024 per series), compute p50/p95/p99 at snapshot time via sort.
+   - Labels order-insensitive when keying — sort keys before hashing.
+   - Pure JS — no perf_hooks assumptions.
+2. `tests/obs/metrics.test.ts`:
+   - `inc` twice with same labels → counter value = 2
+   - `inc` with same name + different labels → two separate counters
+   - `observe` 100 values → histogram.count=100, sum correct, p50/p95/p99 sane
+   - Labels `{a:"1",b:"2"}` and `{b:"2",a:"1"}` hash to same series
+   - Bounded ring: observing 2000 values still gives 1024-sample percentiles
 
 ## Constraints
 
-- Do NOT touch `src/memory/sqlite-store.ts`, `types.ts`, `index.ts`,
-  or `store.ts`.
-- Do NOT add deps.
+- Node built-ins only.
+- Do NOT touch other subsystems.
 - Strict TS, no `any`.
 
-## Acceptance criterion
-
-- 2 files.
-- `pnpm check` + `pnpm test tests/memory/retention.test.ts` pass.
-- SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
-
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

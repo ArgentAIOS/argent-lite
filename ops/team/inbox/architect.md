@@ -1,29 +1,20 @@
-# Task 008 — architect
+# Task 009 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: phase3-integration-plan
-Branch: codex/phase3-integration-plan (worktree /home/jason/code/argent-lite-cli)
-Surface (WRITE authorized — nothing else):
-- ops/team/outbox/architect.md
-- ops/projects/phase3-integration-plan.md
+Slice: observability-design
+Branch: codex/observability-design (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/observability-design.md
 
 ## Goal
 
-Write `ops/projects/phase3-integration-plan.md` (≤150 lines): the
-concrete plan for tying the Phase 3 pieces together (memory, channels,
-agent-router wiring, CredentialStore injection). Explain:
+Write `ops/projects/observability-design.md` (≤150 lines):
 
-1. **Dependency graph** between memory-store, channels, router-agent-live,
-   and the existing agents + scheduler. ASCII diagram.
-2. **First runtime slice** — a single end-to-end flow: stdin → CLI channel
-   → RouterAgent → Router → Ollama → stdout, with memory-store
-   capturing the interaction.
-3. **Dogfooding plan** — what's the smoke test that proves it works?
-4. **Acceptance criteria** for the phase-3 gate.
-5. **Open questions** (retention defaults, channel auth, etc.).
+1. What do we log? (structured JSON lines to stderr + optional file sink).
+2. What do we count? (metrics: router route count, provider latency histogram, agent message volume, memory write/read).
+3. Trace context: optional `trace_id` stamped at channel entry, propagated through bus → agent → router → provider.
+4. Transport: no OTLP in Phase 3. Local JSONL only. An exporter slice later.
+5. Interfaces: `Logger`, `Metrics`, `Tracer`. TS signatures.
+6. Candidate files: `src/obs/**`.
+7. Acceptance criteria.
 
-SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
-
-## Deadline
-
-Before next cron tick.
+SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.

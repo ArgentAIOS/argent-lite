@@ -1,59 +1,54 @@
-# Task 008 — engineer-floor
+# Task 009 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: channel-cli-stdio
-Branch: codex/channel-cli-stdio (worktree /home/jason/code/argent-lite-floor)
-Surface (WRITE authorized — nothing else):
+Slice: obs-logger
+Branch: codex/obs-logger (worktree /home/jason/code/argent-lite-floor)
+Surface:
 - ops/team/outbox/engineer-floor.md
-- src/channels/cli-stdio.ts
-- src/channels/types.ts
-- src/channels/index.ts
-- tests/channels/cli-stdio.test.ts
-
-## Context
-
-Phase 3 design at `ops/projects/channels-lite-design.md`. First
-concrete channel: CLI stdin/stdout. Reads lines from stdin, posts
-them as `AgentMessage`s to the bus, streams replies back to stdout.
+- src/obs/logger.ts
+- src/obs/types.ts
+- src/obs/index.ts
+- tests/obs/logger.test.ts
 
 ## Goal
 
-1. **`src/channels/types.ts`** — interfaces:
+Phase 3 observability **logger** layer.
+
+1. `src/obs/types.ts` — `Logger` interface:
    ```ts
-   export interface Channel {
-     readonly id: string;
-     start(): Promise<void>;
-     stop(): Promise<void>;
+   export type LogLevel = "debug" | "info" | "warn" | "error";
+   export interface LogRecord {
+     level: LogLevel;
+     msg: string;
+     ts: number;
+     fields?: Record<string, unknown>;
    }
-   export interface ChannelOptions {
-     agentId: string;  // which agent to deliver input to
-     bus: { send(msg: AgentMessage): void; subscribe(id: string, h: (msg: AgentMessage) => void): () => void };
+   export interface Logger {
+     child(fields: Record<string, unknown>): Logger;
+     log(record: LogRecord): void;
+     debug(msg: string, fields?: Record<string, unknown>): void;
+     info(msg: string, fields?: Record<string, unknown>): void;
+     warn(msg: string, fields?: Record<string, unknown>): void;
+     error(msg: string, fields?: Record<string, unknown>): void;
    }
    ```
-2. **`src/channels/cli-stdio.ts`** — `CliStdioChannel` class. In `start()`:
-   - Creates a readline interface on `process.stdin` (or injected `stdin`).
-   - For each line, creates an `AgentMessage` `{id, from: "cli", to: agentId, kind: "prompt", payload: {prompt: line}, ts}` and sends to the bus.
-   - Subscribes to replies addressed to `"cli"` and writes them to `process.stdout` (or injected `stdout`). Filters `kind === "completion"` → writes `payload.text`; `kind === "error"` → writes `[error] payload.message`.
-   - `stop()` closes the readline + unsubscribes.
-3. **`src/channels/index.ts`** — re-exports.
-4. **`tests/channels/cli-stdio.test.ts`** — uses `stream.PassThrough`
-   for injected stdin/stdout. Writes a line to stdin, asserts the bus
-   received a message with the right shape. Fakes a completion reply on
-   the bus, asserts the text is written to stdout.
+2. `src/obs/logger.ts` — `createLogger(opts: { level?: LogLevel; out?: NodeJS.WritableStream; now?: () => number }): Logger`.
+   - Writes one JSON line per log call to `out` (default `process.stderr`).
+   - Level filter: drops records below `level`.
+   - `child(fields)` returns a logger that merges `fields` into every record.
+   - No colors, no pretty-printing — structured JSON only.
+3. `src/obs/index.ts` — re-exports.
+4. `tests/obs/logger.test.ts` — uses `stream.PassThrough` for `out`, asserts:
+   - JSON shape round-trips
+   - level filter drops lower records
+   - child merges fields
+   - ts injected from `now`
+   - error arg with a cause object is serialized safely
 
 ## Constraints
 
-- Inject stdin/stdout so tests can use PassThrough.
-- Do NOT touch `src/agents/**`, `src/router/**`, etc.
-- Node built-ins only (`node:readline`, `node:stream`).
-- Strict TS, ESM, no `any`.
+- Node built-ins only. No new deps.
+- Do NOT touch other subsystems.
+- Strict TS, no `any`.
 
-## Acceptance criterion
-
-- 4 files exist.
-- `pnpm check` + `pnpm test tests/channels/` pass.
-- SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
-
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

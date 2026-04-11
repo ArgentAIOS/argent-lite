@@ -1,49 +1,46 @@
-# Task 008 — engineer-router
+# Task 009 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: router-agent-live
-Branch: codex/router-agent-live (worktree /home/jason/code/argent-lite-router)
-Surface (WRITE authorized — nothing else):
+Slice: router-metrics-wiring
+Branch: codex/router-metrics-wiring (worktree /home/jason/code/argent-lite-router)
+Surface:
 - ops/team/outbox/engineer-router.md
-- src/demo/e2e-runner.ts
-- tests/demo/e2e-runner.test.ts
-
-## Context
-
-Cycle-7 landed `RouterAgent` (PR #18) with injected mock router. Now
-wire it to the **real** default router (from cycle-6 PR #15
-`createDefaultRouter`) + a real credential store (`createCredentialStore`
-from cycle-3 PR #3), boot a mini end-to-end demo.
+- src/router/instrumented-router.ts
+- tests/router/instrumented-router.test.ts
 
 ## Goal
 
-1. **`src/demo/e2e-runner.ts`** — `runE2E(opts?)` async function:
-   - Builds `MessageBus`, `AgentContext`.
-   - Creates a `CredentialStore` with env backend via `createCredentialStore({backend: "env"})`.
-   - Calls `createDefaultRouter({ credentials })` from `../router/default-router.js`.
-   - Wraps the context via `withRouter(ctx, router)`.
-   - Instantiates `RouterAgent("router", wrappedCtx)`.
-   - Registers with a `Scheduler`, enqueues a task carrying a prompt.
-   - Ticks the scheduler; sends a message to the agent over the bus;
-     awaits the reply.
-   - Returns `{ status: "ok", text }` or `{ status: "error", message }`.
-   - Accepts injected `router` override so tests can bypass network.
-2. **`tests/demo/e2e-runner.test.ts`** — injects a mock router that
-   returns `{ text: "mocked", model: "m", providerId: "mock" }`.
-   Asserts the runner boots, enqueues, routes, and returns `{ status: "ok", text: "mocked" }`.
+Wrap `ModelRouter` with a thin instrumentation layer that increments
+metrics and logs each route call. No changes to ModelRouter itself.
+
+1. `src/router/instrumented-router.ts`:
+   ```ts
+   export interface InstrumentOptions {
+     inner: Router;
+     metrics?: Metrics;
+     logger?: Logger;
+     now?: () => number;
+   }
+   export function instrumentRouter(opts: InstrumentOptions): Router;
+   ```
+   - Returned Router delegates `route(req)` and `register(p)` to `inner`.
+   - On `route()`:
+     - `metrics.inc("router.route.total", { policy: "unknown" })` before
+     - Time via `now()` around the call
+     - `metrics.observe("router.route.latency_ms", duration, { ok: success ? "true" : "false" })`
+     - `metrics.inc("router.route.success"|"router.route.failure")`
+     - `logger.info("router.route", { duration_ms, ok, provider: res.providerId? })`
+2. `tests/router/instrumented-router.test.ts`:
+   - Inject a fake `inner` that returns a canned response; verify counters + histogram.
+   - Inject a fake `inner` that throws; verify failure counter + logger.error.
+   - Verify delegation: `register(p)` reaches the inner.
 
 ## Constraints
 
-- Do NOT touch `src/agents/**`, `src/router/**`, `src/scheduler/**`.
-- Inject credentials + router override for tests.
+- Do NOT touch ModelRouter, existing router files, or agents.
+- Do NOT import `src/obs/**` runtime — take `Metrics` / `Logger` as
+  injected options (interface-only imports via `import type`). This keeps
+  the router decoupled from observability impl.
 - Strict TS, no `any`.
 
-## Acceptance criterion
-
-- 2 files.
-- `pnpm check` + `pnpm test tests/demo/e2e-runner.test.ts` pass.
-- SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
-
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
