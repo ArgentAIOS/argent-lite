@@ -1,45 +1,46 @@
-# Task 009 — engineer-auth
+# Task 010 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: obs-metrics
-Branch: codex/obs-metrics (worktree /home/jason/code/argent-lite-auth)
+Slice: satellite-auth-hardening
+Branch: codex/satellite-auth-hardening (worktree /home/jason/code/argent-lite-auth)
 Surface:
 - ops/team/outbox/engineer-auth.md
-- src/obs/metrics.ts
-- tests/obs/metrics.test.ts
+- src/satellite/auth.ts
+- tests/satellite/auth.test.ts
+
+## Context
+
+Cycle-4 landed satellite-protocol-stub (PR #7) with optional bearer
+auth. Before satellite mode can be exposed off-box, auth MUST be
+mandatory.
 
 ## Goal
 
-Phase 3 observability **metrics** layer.
-
-1. `src/obs/metrics.ts`:
-   ```ts
-   export interface Metrics {
-     inc(name: string, labels?: Record<string, string>, by?: number): void;
-     observe(name: string, value: number, labels?: Record<string, string>): void;
-     snapshot(): MetricsSnapshot;
-   }
-   export interface MetricsSnapshot {
-     counters: Array<{ name: string; labels: Record<string, string>; value: number }>;
-     histograms: Array<{ name: string; labels: Record<string, string>; count: number; sum: number; p50: number; p95: number; p99: number }>;
-   }
-   export function createMetrics(): Metrics;
-   ```
-   - Counters: monotonic, keyed by `name + labels`.
-   - Histograms: store observations in a bounded ring (cap 1024 per series), compute p50/p95/p99 at snapshot time via sort.
-   - Labels order-insensitive when keying — sort keys before hashing.
-   - Pure JS — no perf_hooks assumptions.
-2. `tests/obs/metrics.test.ts`:
-   - `inc` twice with same labels → counter value = 2
-   - `inc` with same name + different labels → two separate counters
-   - `observe` 100 values → histogram.count=100, sum correct, p50/p95/p99 sane
-   - Labels `{a:"1",b:"2"}` and `{b:"2",a:"1"}` hash to same series
-   - Bounded ring: observing 2000 values still gives 1024-sample percentiles
+1. `src/satellite/auth.ts`:
+   - `hmacSign(body: string, secret: string): string` — HMAC-SHA256 of
+     body, returns hex.
+   - `verifyHmac(body: string, secret: string, signature: string): boolean`
+     — constant-time comparison via `crypto.timingSafeEqual`.
+   - `SatelliteAuthError` class.
+   - `requireAuth(req, opts: { secret: string }): void` — reads the
+     `authorization` header (`Bearer <token>`) and `x-satellite-sig`
+     header, verifies token equals `opts.secret` and sig is valid for
+     the body. Throws `SatelliteAuthError` on any failure.
+2. `tests/satellite/auth.test.ts`:
+   - HMAC round-trip with fixed body/secret → stable hex
+   - `verifyHmac` returns true on match, false on mismatch
+   - `requireAuth` passes on valid headers
+   - Missing authorization → throws with clear message
+   - Wrong secret → throws
+   - Tampered body → throws
+   - Timing safety: compare two wrong-sigs of same length doesn't short-circuit
 
 ## Constraints
 
-- Node built-ins only.
-- Do NOT touch other subsystems.
+- Node built-ins only (`node:crypto`).
+- Do NOT touch `src/satellite/server.ts`, `client.ts`, `protocol.ts`,
+  `types.ts`, or `index.ts`. A follow-up slice will wire `requireAuth`
+  into the server.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

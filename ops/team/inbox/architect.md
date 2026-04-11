@@ -1,20 +1,22 @@
-# Task 009 — architect
+# Task 010 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: observability-design
-Branch: codex/observability-design (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/observability-design.md
+Slice: intent-routing-design
+Branch: codex/intent-routing-design (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/intent-routing-design.md
 
 ## Goal
 
-Write `ops/projects/observability-design.md` (≤150 lines):
+`ops/projects/intent-routing-design.md` (≤150 lines, §9 shape): how
+does Argent Lite decide which agent handles an incoming channel message?
 
-1. What do we log? (structured JSON lines to stderr + optional file sink).
-2. What do we count? (metrics: router route count, provider latency histogram, agent message volume, memory write/read).
-3. Trace context: optional `trace_id` stamped at channel entry, propagated through bus → agent → router → provider.
-4. Transport: no OTLP in Phase 3. Local JSONL only. An exporter slice later.
-5. Interfaces: `Logger`, `Metrics`, `Tracer`. TS signatures.
-6. Candidate files: `src/obs/**`.
-7. Acceptance criteria.
+1. Intent model — what is an "intent" (string kind + payload schema).
+2. Routing strategies: static (channel → agent), keyword-based,
+   LLM-classified (uses router).
+3. Registry: `IntentRouter` interface — `register(intent, handler)`, `dispatch(msg) → agentId`.
+4. Fallback + conflict resolution.
+5. Candidate files: `src/intents/**`.
+6. Integration with channels (how channel output becomes intent dispatch).
+7. Acceptance criteria + phased sub-slices.
 
 SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.

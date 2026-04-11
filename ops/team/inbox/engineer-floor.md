@@ -1,54 +1,45 @@
-# Task 009 — engineer-floor
+# Task 010 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: obs-logger
-Branch: codex/obs-logger (worktree /home/jason/code/argent-lite-floor)
+Slice: channel-http
+Branch: codex/channel-http (worktree /home/jason/code/argent-lite-floor)
 Surface:
 - ops/team/outbox/engineer-floor.md
-- src/obs/logger.ts
-- src/obs/types.ts
-- src/obs/index.ts
-- tests/obs/logger.test.ts
+- src/channels/http.ts
+- tests/channels/http.test.ts
 
 ## Goal
 
-Phase 3 observability **logger** layer.
+Second concrete channel: HTTP POST endpoint. Accepts prompts, delivers
+to an agent over the bus, returns the completion.
 
-1. `src/obs/types.ts` — `Logger` interface:
-   ```ts
-   export type LogLevel = "debug" | "info" | "warn" | "error";
-   export interface LogRecord {
-     level: LogLevel;
-     msg: string;
-     ts: number;
-     fields?: Record<string, unknown>;
-   }
-   export interface Logger {
-     child(fields: Record<string, unknown>): Logger;
-     log(record: LogRecord): void;
-     debug(msg: string, fields?: Record<string, unknown>): void;
-     info(msg: string, fields?: Record<string, unknown>): void;
-     warn(msg: string, fields?: Record<string, unknown>): void;
-     error(msg: string, fields?: Record<string, unknown>): void;
-   }
-   ```
-2. `src/obs/logger.ts` — `createLogger(opts: { level?: LogLevel; out?: NodeJS.WritableStream; now?: () => number }): Logger`.
-   - Writes one JSON line per log call to `out` (default `process.stderr`).
-   - Level filter: drops records below `level`.
-   - `child(fields)` returns a logger that merges `fields` into every record.
-   - No colors, no pretty-printing — structured JSON only.
-3. `src/obs/index.ts` — re-exports.
-4. `tests/obs/logger.test.ts` — uses `stream.PassThrough` for `out`, asserts:
-   - JSON shape round-trips
-   - level filter drops lower records
-   - child merges fields
-   - ts injected from `now`
-   - error arg with a cause object is serialized safely
+1. `src/channels/http.ts` — `HttpChannel` implementing the `Channel`
+   interface from `src/channels/types.ts`:
+   - Constructor: `{ agentId, bus, port?: number, host?: string }`.
+   - `start()` — creates `http.Server` on `port` (default 0 = random),
+     handles `POST /v1/prompt` with JSON body `{prompt: string}`.
+   - Delivers prompt to bus, awaits reply with same `trace_id`, writes
+     JSON response.
+   - 10-second timeout via `AbortController`; returns 504 on timeout.
+   - `stop()` closes the server.
+   - `port` getter after `start()` so tests can grab the chosen port.
+2. `tests/channels/http.test.ts`:
+   - Start the channel on port 0, get actual port, POST to `/v1/prompt`
+     via Node `fetch`, fake a bus reply, assert JSON response.
+   - Test 404 on unknown path.
+   - Test 400 on bad body.
+   - Test 504 on no reply within timeout (use short timeout + stub bus
+     that never replies).
 
 ## Constraints
 
-- Node built-ins only. No new deps.
+- Node built-ins only (`node:http`).
 - Do NOT touch other subsystems.
 - Strict TS, no `any`.
 
-## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
+## Acceptance criterion
+
+- 2 files, pnpm check + pnpm test tests/channels/http.test.ts pass.
+- SELF-COMMIT, PUSH, PR.
+
+## Deadline: before next cron tick.
