@@ -13,6 +13,7 @@ import {
 import { createDefaultRouter } from "../router/default-router.js";
 import type { Router } from "../router/index.js";
 import { createCredentialStore } from "../auth/index.js";
+import { createNoopMemory } from "../agents/__fixtures__/noop-memory.js";
 
 export interface RunE2EOptions {
   router?: Router;
@@ -36,6 +37,7 @@ export async function runE2E(opts: RunE2EOptions = {}): Promise<E2EResult> {
     bus,
     now: opts.now,
     abort: abort.signal,
+    memory: createNoopMemory(),
   });
 
   const router =

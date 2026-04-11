@@ -171,6 +171,7 @@ export async function bootRuntime(
     bus,
     now,
     abort: abortController.signal,
+    memory,
   });
   const ctx = withRouter(baseCtx, router);
   const agent = new RouterAgent("router", ctx);

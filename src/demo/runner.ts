@@ -3,6 +3,7 @@ import {
   createAgentContext,
   type AgentContext,
 } from "../agents/index.js";
+import { createNoopMemory } from "../agents/__fixtures__/noop-memory.js";
 import {
   Scheduler,
   type SchedulableAgent,
@@ -33,7 +34,7 @@ const DEMO_TASK_ID = "demo-greet-1";
 export async function runDemo(opts: RunDemoOptions = {}): Promise<DemoResult> {
   const log = opts.logger ?? ((line: string) => console.log(line));
   const bus = new MessageBus();
-  const ctx = createAgentContext({ bus, now: opts.now });
+  const ctx = createAgentContext({ bus, now: opts.now, memory: createNoopMemory() });
   const scheduler = new Scheduler({ now: opts.now });
 
   const Ctor = opts.helloAgentCtor ?? (await loadHelloAgent());
