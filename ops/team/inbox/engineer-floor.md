@@ -1,58 +1,40 @@
-# Task 013 — engineer-floor
+# Task 014 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: phase3-smoke-script
-Branch: codex/phase3-smoke-script (worktree /home/jason/code/argent-lite-floor)
-Surface:
+Slice: phase3-registry-update
+Branch: codex/phase3-registry-update (worktree /home/jason/code/argent-lite-floor)
+Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-floor.md
-- scripts/phase3-smoke.sh
-- tests/integration/smoke-runner.test.ts
-- docs/phase3-smoke.md
-
-## Context
-
-Threadmaster ran the §4 one-liner manually and found bugs. Make the
-smoke reproducible and self-verifying so the next integration pass
-can assert pass/fail without a human.
+- ops/slices/REGISTRY.md
+- ops/projects/ACTIVE.md
+- ops/team/JOURNAL.md                       (create if missing)
+- README.md                                  (light touch only — add a "status" line)
 
 ## Goal
 
-1. **`scripts/phase3-smoke.sh`** — bash, `set -euo pipefail`:
-   - Build the project (`pnpm build`)
-   - Create an `ARGENT_HOME=$(mktemp -d)` temp dir
-   - Run the runtime with a stub provider (not ollama) via a small
-     Node inline script so the smoke works in CI without ollama:
-     ```
-     node -e "
-       import('./dist/src/integration/runtime.js').then(async r => {
-         const { bootRuntime } = r;
-         const stub = { id:'stub', kind:'local',
-           async complete(req){ return { text: 'stub:'+req.prompt, model:'stub', providerId:'stub' }; },
-           async healthCheck(){ return true; } };
-         const runtime = await bootRuntime({ stdin: process.stdin, stdout: process.stdout, memoryPath: process.env.ARGENT_HOME+'/memory.sqlite', providers: [stub] });
-         let drained = false;
-         process.stdin.once('end', ()=>{ drained=true; });
-         while(!drained) await new Promise(r=>setTimeout(r,50));
-         await new Promise(r=>setTimeout(r,2000));
-         await runtime.shutdown();
-         process.exit(0);
-       });
-     " <<< "hello smoke"
-     ```
-   - Query the memory DB with `node --experimental-sqlite -e '...'`:
-     assert `channel.in >= 1`, `channel.out >= 1` OR `router.out >= 1`.
-   - Exit 0 on pass, 1 on fail. Log what it found.
-2. **`tests/integration/smoke-runner.test.ts`** — a vitest that
-   invokes the bash script via `child_process.execFile`, asserts exit 0.
-   Skip if the script is not present (for old branches).
-3. **`docs/phase3-smoke.md`** — one page: why this exists, how to run
-   it locally, what it checks, what a failure means.
+Update the operational state files so REGISTRY/ACTIVE/JOURNAL reflect
+the real state after cycles 7–13.
+
+1. **`ops/slices/REGISTRY.md`** — add every cycle-7 through cycle-13
+   slice to the Completed Slices table with PR numbers. Active Slices
+   should only contain `ops-team-bootstrap` (integration branch) and
+   any still-in-progress work.
+2. **`ops/projects/ACTIVE.md`** — mark "Argent Lite Phase 1" and
+   "Phase 2 scaffold" complete; mark "Phase 3 implementation" as
+   complete-pending-sign-off; add "Phase 3 sign-off" row.
+3. **`ops/team/JOURNAL.md`** — create if missing. Append a single
+   dated entry `2026-04-11` summarizing: 13 cycles run, 45 PRs,
+   189 tests, Phase 3 stub smoke green, Pi load constraint.
+4. **`README.md`** — add a single status line near the top:
+   `**Status:** Phase 3 structurally complete at cycle-13
+   (`codex/ops-team-bootstrap@e683f11`). See
+   `ops/projects/phase3-complete.md`.`
+   Do not rewrite the README.
 
 ## Constraints
 
-- Pure bash + node for the script. No new deps.
-- Do NOT touch src/** runtime code. You are only writing test harness
-  + docs.
-- Strict TS, no `any`.
+- Do NOT touch `src/**` or other `ops/projects/*.md`.
+- README: minimal diff.
+- Strict Markdown, no broken links.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

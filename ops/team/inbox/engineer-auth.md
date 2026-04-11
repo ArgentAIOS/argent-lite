@@ -1,64 +1,45 @@
-# Task 013 — engineer-auth
+# Task 014 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: event-kind-reconcile
-Branch: codex/event-kind-reconcile (worktree /home/jason/code/argent-lite-auth)
+Slice: ollama-smoke-retry
+Branch: codex/ollama-smoke-retry (worktree /home/jason/code/argent-lite-auth)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-auth.md
-- src/router/memory-router.ts
-- src/runtime/event-kinds.ts
-- ops/projects/event-kind-vocabulary.md
-- tests/router/memory-router.test.ts
-- tests/runtime/event-kinds.test.ts
-- src/integration/runtime.ts                 (ONLY to update the fallback allowlist)
+- scripts/phase3-ollama-smoke.sh
+- tests/integration/ollama-smoke.skip.md
 
 ## Context
 
-Threadmaster's Phase 3 §4 smoke revealed the vocabulary is split:
-
-- `src/router/memory-router.ts` writes `kind: "router.route"` and
-  `kind: "router.error"`.
-- `src/runtime/event-kinds.ts` (cycle-12 lock PR #38) defines the set
-  as `["channel.in","channel.out","router.in","router.out","agent.error"]`.
-- `src/integration/runtime.ts` fallback allowlist uses the OLD kinds
-  `router.route`, `router.error` — and that disagrees with the lock.
-
-## Decision
-
-**Canonical kinds: `router.in`, `router.out`, `agent.error`.**
-
-Rationale: cycle-12's lock is the published contract. `router.route`
-was a pre-lock draft name. Update `memory-router.ts` and
-`integration/runtime.ts` fallback to use `router.out` (success) and
-`agent.error` (failure).
+`scripts/phase3-smoke.sh` uses a stub provider and passes. The real
+ollama §4 smoke (against `localhost:11434`) was attempted earlier but
+the Pi's load average hit 13 during the autonomous run and ollama
+timed out. We want a real-ollama smoke script that can run later
+(after load drops, or on a dedicated Pi), with explicit timeout and
+pass/fail reporting.
 
 ## Goal
 
-1. **`src/router/memory-router.ts`** — change its two kind writes:
-   - success → `router.out` (payload should include req + providerId + model).
-   - failure → `agent.error` (payload includes req + error message).
-2. **`tests/router/memory-router.test.ts`** — update assertions to
-   expect the new kinds.
-3. **`src/integration/runtime.ts`** — update the fallback allowlist
-   constant to match `src/runtime/event-kinds.ts` (so the fallback
-   and the real lock agree).
-4. **`src/runtime/event-kinds.ts`** — add a top-of-file comment
-   documenting that these are the ONLY 5 kinds the runtime writes,
-   and that any future kind requires a design change.
-5. **`ops/projects/event-kind-vocabulary.md`** — append a §"2026-04-11
-   reconciliation" note describing the mismatch and the fix.
-6. **`tests/runtime/event-kinds.test.ts`** — add a regression test
-   that the old kinds `router.route` and `router.error` are **not**
-   accepted by `isEventKind`.
+1. **`scripts/phase3-ollama-smoke.sh`** — bash, `set -euo pipefail`:
+   - `curl -s -o /dev/null -w '%{http_code}' http://localhost:11434/api/tags`
+     — if not 200, exit 77 (SKIP) with a clear message.
+   - Check load average via `cat /proc/loadavg`; if the 1-min load is
+     above 6.0, print a warning and exit 77 (SKIP with reason "pi overloaded").
+   - Build dist if stale.
+   - Run the bootRuntime + OllamaProvider invocation inline via `node -e`
+     with `gemma3:1b`, input "what is 2+2 in one word".
+   - Timeout 45 seconds via `timeout 45 node ...`.
+   - After the run, query `memory.sqlite` via node:sqlite and assert:
+     `channel.in >= 1`, `router.out >= 1`, `channel.out >= 1`.
+   - Exit 0 on full pass, 1 on failure, 77 on skip. Log everything
+     to `/tmp/ollama-smoke-$(date +%s).log`.
+2. **`tests/integration/ollama-smoke.skip.md`** — one paragraph
+   explaining why this script exists as a separate smoke, when to run
+   it, and how to interpret exit code 77 (SKIP).
 
 ## Constraints
 
-- Do NOT touch other subsystems.
-- Strict TS, no `any`.
+- Do NOT touch `scripts/phase3-smoke.sh` — that's the canonical CI stub smoke.
+- Node built-ins only, no new deps.
+- Pure script + docs. No src/** changes.
 
-## Acceptance criterion
-
-- `pnpm check` + `pnpm test tests/router/memory-router tests/runtime/event-kinds` pass.
-- SELF-COMMIT, PUSH, PR.
-
-## Deadline: before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

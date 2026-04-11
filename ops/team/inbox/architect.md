@@ -1,45 +1,33 @@
-# Task 013 — architect
+# Task 014 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: phase3-bugfix-plan
-Branch: codex/phase3-bugfix-plan (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/phase3-bugfix-plan.md
+Slice: phase3-complete
+Branch: codex/phase3-complete (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/phase3-complete.md
 
 ## Context
 
-Threadmaster ran the Phase 3 §4 acceptance smoke against real ollama
-and found three integration bugs. Unit tests all pass (188/188) but
-end-to-end does NOT:
-
-1. **Event-kind mismatch:** `src/router/memory-router.ts` writes kinds
-   `router.route` and `router.error`, but
-   `src/runtime/event-kinds.ts` (cycle-12 lock) defines the allowed set
-   as `channel.in | channel.out | router.in | router.out | agent.error`.
-   runtime.ts has a fallback allowlist that still has the old kinds,
-   so the dynamic-import of the real lock is actually a regression.
-2. **Bus → agent wiring missing:** `bootRuntime` subscribes to `"router"`
-   and logs `channel.in`, but never delivers the message to the
-   `RouterAgent` instance. `RouterAgent.onMessage` is never called.
-3. **Reply routing:** CliStdioChannel subscribes to `"cli"`, but
-   RouterAgent's completion goes to `msg.from` (which is `"cli"` only
-   because the channel sets it that way). Verify the path end-to-end.
-
-Evidence: smoke run on `codex/ops-team-bootstrap` at 6b8a165.
-After piping `"say hi"` into chat, `memory.sqlite` contained only
-one `channel.in` row — zero `router.*` or `channel.out` rows.
+Phase 3 is structurally done as of `codex/ops-team-bootstrap@e683f11`:
+- 189/189 unit tests pass
+- `scripts/phase3-smoke.sh` passes with 3/3 event kinds + stdout reply
+- `bootRuntime()` is the single constructor, `argent chat` works
+- Event vocabulary locked to 5 kinds
 
 ## Goal
 
-Write `ops/projects/phase3-bugfix-plan.md` (≤100 lines):
+Write `ops/projects/phase3-complete.md` (≤150 lines):
 
-1. Restate the 3 bugs with line-level citations.
-2. For each bug: the canonical fix — which file owns the fix, what
-   the signature/behavior must be, and which test must now pass.
-3. Resolve the event-kind vocabulary question: should
-   `memory-router.ts` change its kinds, or should the vocabulary
-   include `router.route`/`router.error`? Pick ONE and explain why.
-4. Propose sub-slices for cycle-14 if needed.
+1. **Status:** Phase 3 COMPLETE (pending operator sign-off).
+2. **Evidence table:** one row per §7 acceptance criterion from
+   `phase3-acceptance.md` with pass/fail + link to PR or smoke log.
+3. **PR index:** cycles 7–13 with PR numbers grouped by theme
+   (memory, channels, obs, runtime seam, bugfix).
+4. **What's IN main after cycle-13:** bullet list of subsystems live
+   on `codex/ops-team-bootstrap`.
+5. **What's NOT done:** satellite runtime wiring, multi-agent fan-out,
+   LLM-based intents, Hailo real integration (arrives 2026-04-12),
+   retention telemetry. Explicit deferral list.
+6. **Operator sign-off request:** what the operator needs to do to
+   mark Phase 3 closed on `main`.
 
-SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
-
-## Deadline: before next cron tick.
+SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.
