@@ -1,41 +1,45 @@
-# Task 012 — architect
+# Task 013 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: event-kind-lock
-Branch: codex/event-kind-lock (worktree /home/jason/code/argent-lite-cli)
-Surface (WRITE authorized — nothing else):
-- ops/team/outbox/architect.md
-- ops/projects/event-kind-vocabulary.md
-- src/runtime/event-kinds.ts
-- tests/runtime/event-kinds.test.ts
+Slice: phase3-bugfix-plan
+Branch: codex/phase3-bugfix-plan (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/phase3-bugfix-plan.md
 
 ## Context
 
-`ops/projects/phase3-acceptance.md` §3.8 requires locking the runtime
-event-kind vocabulary to exactly 5 values before Phase 3 closes:
-`channel.in`, `channel.out`, `router.in`, `router.out`, `agent.error`.
+Threadmaster ran the Phase 3 §4 acceptance smoke against real ollama
+and found three integration bugs. Unit tests all pass (188/188) but
+end-to-end does NOT:
+
+1. **Event-kind mismatch:** `src/router/memory-router.ts` writes kinds
+   `router.route` and `router.error`, but
+   `src/runtime/event-kinds.ts` (cycle-12 lock) defines the allowed set
+   as `channel.in | channel.out | router.in | router.out | agent.error`.
+   runtime.ts has a fallback allowlist that still has the old kinds,
+   so the dynamic-import of the real lock is actually a regression.
+2. **Bus → agent wiring missing:** `bootRuntime` subscribes to `"router"`
+   and logs `channel.in`, but never delivers the message to the
+   `RouterAgent` instance. `RouterAgent.onMessage` is never called.
+3. **Reply routing:** CliStdioChannel subscribes to `"cli"`, but
+   RouterAgent's completion goes to `msg.from` (which is `"cli"` only
+   because the channel sets it that way). Verify the path end-to-end.
+
+Evidence: smoke run on `codex/ops-team-bootstrap` at 6b8a165.
+After piping `"say hi"` into chat, `memory.sqlite` contained only
+one `channel.in` row — zero `router.*` or `channel.out` rows.
 
 ## Goal
 
-1. **`ops/projects/event-kind-vocabulary.md`** — one page describing
-   each kind, its shape, and its producer. Exactly 5 kinds, no more.
-2. **`src/runtime/event-kinds.ts`** — exports:
-   ```ts
-   export const EVENT_KINDS = ["channel.in","channel.out","router.in","router.out","agent.error"] as const;
-   export type EventKind = typeof EVENT_KINDS[number];
-   export function isEventKind(v: string): v is EventKind {
-     return (EVENT_KINDS as readonly string[]).includes(v);
-   }
-   export function assertEventKind(v: string): asserts v is EventKind {
-     if (!isEventKind(v)) throw new Error(`invalid event kind: ${v}`);
-   }
-   ```
-3. **`tests/runtime/event-kinds.test.ts`** — `isEventKind` returns true
-   for each of the 5 and false for others; `assertEventKind` throws on
-   invalid; constants are frozen (can't be mutated).
+Write `ops/projects/phase3-bugfix-plan.md` (≤100 lines):
+
+1. Restate the 3 bugs with line-level citations.
+2. For each bug: the canonical fix — which file owns the fix, what
+   the signature/behavior must be, and which test must now pass.
+3. Resolve the event-kind vocabulary question: should
+   `memory-router.ts` change its kinds, or should the vocabulary
+   include `router.route`/`router.error`? Pick ONE and explain why.
+4. Propose sub-slices for cycle-14 if needed.
 
 SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick.

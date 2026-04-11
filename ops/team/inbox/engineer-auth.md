@@ -1,71 +1,64 @@
-# Task 012 — engineer-auth
+# Task 013 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: agent-context-memory
-Branch: codex/agent-context-memory (worktree /home/jason/code/argent-lite-auth)
+Slice: event-kind-reconcile
+Branch: codex/event-kind-reconcile (worktree /home/jason/code/argent-lite-auth)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-auth.md
-- src/agents/agent-context.ts
-- src/agents/index.ts                         (re-export types)
-- tests/agents/agent-context.test.ts
-- src/agents/hello-agent.ts                   (update if needed)
-- src/agents/router-agent.ts                  (update if needed)
-- tests/agents/hello-agent.test.ts            (update construction sites)
-- tests/agents/router-agent.test.ts           (update construction sites)
-- tests/agents/base-agent.test.ts             (update construction sites)
-- tests/agents/context-with-router.test.ts   (update construction sites)
-- tests/demo/runner.test.ts                   (update if it constructs AgentContext directly)
+- src/router/memory-router.ts
+- src/runtime/event-kinds.ts
+- ops/projects/event-kind-vocabulary.md
+- tests/router/memory-router.test.ts
+- tests/runtime/event-kinds.test.ts
+- src/integration/runtime.ts                 (ONLY to update the fallback allowlist)
 
 ## Context
 
-`ops/projects/phase3-acceptance.md` §3.1 and §5(4): `AgentContext` must
-carry a `memory: MemoryStore` field. It's optional today. This slice
-makes it **required** and updates every construction site.
+Threadmaster's Phase 3 §4 smoke revealed the vocabulary is split:
+
+- `src/router/memory-router.ts` writes `kind: "router.route"` and
+  `kind: "router.error"`.
+- `src/runtime/event-kinds.ts` (cycle-12 lock PR #38) defines the set
+  as `["channel.in","channel.out","router.in","router.out","agent.error"]`.
+- `src/integration/runtime.ts` fallback allowlist uses the OLD kinds
+  `router.route`, `router.error` — and that disagrees with the lock.
+
+## Decision
+
+**Canonical kinds: `router.in`, `router.out`, `agent.error`.**
+
+Rationale: cycle-12's lock is the published contract. `router.route`
+was a pre-lock draft name. Update `memory-router.ts` and
+`integration/runtime.ts` fallback to use `router.out` (success) and
+`agent.error` (failure).
 
 ## Goal
 
-1. **`src/agents/agent-context.ts`** — add `memory: MemoryStore`
-   (import `MemoryStore` via `import type` from `../memory/types.js`).
-   `createAgentContext({...})` now requires a `memory` argument. If
-   callers haven't migrated, they'll fail to compile — that's
-   intentional.
-2. **`src/agents/index.ts`** — re-export `MemoryStore` type via
-   `export type { MemoryStore } from "../memory/types.js";` so agent
-   consumers don't need to import from `src/memory` directly.
-3. **Update construction sites in this slice's authorized surface**
-   so they pass a `memory` argument. For tests, use a tiny in-memory
-   fake that implements `MemoryStore` — put it in
-   `src/agents/__fixtures__/noop-memory.ts` (also authorized, add to
-   surface).
-4. **`tests/agents/agent-context.test.ts`** — assert that
-   `createAgentContext` throws at runtime if memory is missing (via a
-   runtime check since TS will already block it at compile time),
-   and round-trip tests for passing a real memory reference through.
-
-### Updated surface (add to authorized list):
-
-- `src/agents/__fixtures__/noop-memory.ts`
+1. **`src/router/memory-router.ts`** — change its two kind writes:
+   - success → `router.out` (payload should include req + providerId + model).
+   - failure → `agent.error` (payload includes req + error message).
+2. **`tests/router/memory-router.test.ts`** — update assertions to
+   expect the new kinds.
+3. **`src/integration/runtime.ts`** — update the fallback allowlist
+   constant to match `src/runtime/event-kinds.ts` (so the fallback
+   and the real lock agree).
+4. **`src/runtime/event-kinds.ts`** — add a top-of-file comment
+   documenting that these are the ONLY 5 kinds the runtime writes,
+   and that any future kind requires a design change.
+5. **`ops/projects/event-kind-vocabulary.md`** — append a §"2026-04-11
+   reconciliation" note describing the mismatch and the fix.
+6. **`tests/runtime/event-kinds.test.ts`** — add a regression test
+   that the old kinds `router.route` and `router.error` are **not**
+   accepted by `isEventKind`.
 
 ## Constraints
 
-- Do NOT touch `src/memory/**`, `src/router/**`, `src/scheduler/**`,
-  `src/cli/**`, `src/demo/e2e-runner.ts`, `src/integration/**`,
-  `src/intents/**`, `src/channels/**`, `src/satellite/**`, `src/obs/**`,
-  `src/providers/**`, `src/config/**`. These either already inject or
-  will be updated in follow-on slices.
-- Other cycle-12 slices (`phase3-runtime-slice`) consume this update —
-  they'll rebase on integration.
+- Do NOT touch other subsystems.
 - Strict TS, no `any`.
 
 ## Acceptance criterion
 
-- `AgentContext.memory` is required (non-optional).
-- All agent construction sites in the authorized surface pass a
-  `memory` argument.
-- `pnpm check` passes.
-- `pnpm test tests/agents/` passes (at least for the files in your surface).
+- `pnpm check` + `pnpm test tests/router/memory-router tests/runtime/event-kinds` pass.
 - SELF-COMMIT, PUSH, PR.
 
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick.

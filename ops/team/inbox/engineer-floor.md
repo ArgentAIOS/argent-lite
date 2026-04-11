@@ -1,62 +1,58 @@
-# Task 012 — engineer-floor
+# Task 013 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: phase3-e2e-test
-Branch: codex/phase3-e2e-test (worktree /home/jason/code/argent-lite-floor)
-Surface (WRITE authorized — nothing else):
+Slice: phase3-smoke-script
+Branch: codex/phase3-smoke-script (worktree /home/jason/code/argent-lite-floor)
+Surface:
 - ops/team/outbox/engineer-floor.md
-- tests/integration/cli-chat.test.ts
-- tests/integration/stub-provider.ts
-- tests/integration/README.md
+- scripts/phase3-smoke.sh
+- tests/integration/smoke-runner.test.ts
+- docs/phase3-smoke.md
 
 ## Context
 
-`ops/projects/phase3-acceptance.md` §4 requires an integration-only
-test that drives the chat path with a stub provider, no real network,
-and asserts the correct event-kind writes + clean SIGINT teardown.
+Threadmaster ran the §4 one-liner manually and found bugs. Make the
+smoke reproducible and self-verifying so the next integration pass
+can assert pass/fail without a human.
 
 ## Goal
 
-Write the Phase 3 e2e test harness that other cycle-12 slices
-(`agent-context-memory` on codex/agent-context-memory and
-`phase3-runtime-slice` on codex/phase3-runtime-slice) will slot into.
-
-1. **`tests/integration/stub-provider.ts`** — a `Provider`
-   implementation with `id: "stub"`, `kind: "local"`:
-   - `complete(req)` → returns `{ text: "stub reply: " + req.prompt, model: "stub-1", providerId: "stub" }`.
-   - `healthCheck()` → returns `true`.
-2. **`tests/integration/cli-chat.test.ts`** — vitest, included under
-   the `vitest.integration.config.ts` that engineer-floor's cycle-4
-   slice already created. Skeleton:
-   - imports `bootRuntime` from `../../src/integration/runtime.js`
-     **dynamically** with a try/catch so this test SKIPS if the
-     runtime seam isn't merged yet.
-   - uses `stream.PassThrough` for stdin and stdout.
-   - boots runtime with `{ providers: [new StubProvider()], memoryPath: tmpdir, now }`.
-   - writes `"hello"` to stdin, waits for a line on stdout, asserts it starts with `"stub reply:"`.
-   - calls `runtime.shutdown()` and asserts the promise resolves within 500ms.
-   - asserts `memory.query("channel")` returns at least one `channel.in`
-     and one `router.out` event using only the locked vocabulary.
-   - asserts `process._getActiveHandles?.().length` is 0 (or unchanged
-     from baseline) after shutdown.
-3. **`tests/integration/README.md`** — one paragraph on how to run the
-   harness (`pnpm test:integration`).
+1. **`scripts/phase3-smoke.sh`** — bash, `set -euo pipefail`:
+   - Build the project (`pnpm build`)
+   - Create an `ARGENT_HOME=$(mktemp -d)` temp dir
+   - Run the runtime with a stub provider (not ollama) via a small
+     Node inline script so the smoke works in CI without ollama:
+     ```
+     node -e "
+       import('./dist/src/integration/runtime.js').then(async r => {
+         const { bootRuntime } = r;
+         const stub = { id:'stub', kind:'local',
+           async complete(req){ return { text: 'stub:'+req.prompt, model:'stub', providerId:'stub' }; },
+           async healthCheck(){ return true; } };
+         const runtime = await bootRuntime({ stdin: process.stdin, stdout: process.stdout, memoryPath: process.env.ARGENT_HOME+'/memory.sqlite', providers: [stub] });
+         let drained = false;
+         process.stdin.once('end', ()=>{ drained=true; });
+         while(!drained) await new Promise(r=>setTimeout(r,50));
+         await new Promise(r=>setTimeout(r,2000));
+         await runtime.shutdown();
+         process.exit(0);
+       });
+     " <<< "hello smoke"
+     ```
+   - Query the memory DB with `node --experimental-sqlite -e '...'`:
+     assert `channel.in >= 1`, `channel.out >= 1` OR `router.out >= 1`.
+   - Exit 0 on pass, 1 on fail. Log what it found.
+2. **`tests/integration/smoke-runner.test.ts`** — a vitest that
+   invokes the bash script via `child_process.execFile`, asserts exit 0.
+   Skip if the script is not present (for old branches).
+3. **`docs/phase3-smoke.md`** — one page: why this exists, how to run
+   it locally, what it checks, what a failure means.
 
 ## Constraints
 
-- Do NOT touch `src/**`. Test-only surface.
-- Dynamic imports with try/catch so tests pass (as SKIPPED) even
-  before `bootRuntime` lands.
+- Pure bash + node for the script. No new deps.
+- Do NOT touch src/** runtime code. You are only writing test harness
+  + docs.
 - Strict TS, no `any`.
 
-## Acceptance criterion
-
-- 3 files exist.
-- `pnpm test tests/integration/cli-chat.test.ts` either passes (if
-  bootRuntime has landed on the branch) or skips cleanly with a clear
-  message. Must not FAIL.
-- SELF-COMMIT, PUSH, PR.
-
-## Deadline
-
-Before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

@@ -1,13 +1,13 @@
-# Task 012 — reviewer
+# Task 013 — reviewer
 
-Single pass, outbox only, NO git commit, NO PR.
+Single pass, outbox only. NO commit, NO PR.
 
 Branches:
-- codex/event-kind-lock
-- codex/phase3-e2e-test
-- codex/agent-context-memory
-- codex/phase3-runtime-slice
+- codex/phase3-bugfix-plan
+- codex/phase3-smoke-script
+- codex/event-kind-reconcile
+- codex/runtime-bus-wiring-fix
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle12-review
+Slice: cycle13-review
 Deadline: ≤5 minutes.
