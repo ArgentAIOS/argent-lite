@@ -52,9 +52,17 @@ Mandatory before your first action:
 
 Branch and isolation:
 - You are in git worktree \$(pwd). Branch: \$(git rev-parse --abbrev-ref HEAD).
-- Commit every file you create on this branch with a descriptive
-  message that mentions the slice name from your inbox.
-- Do NOT git push. Do NOT merge. Do NOT touch branches other than this one.
+- You run with bypassPermissions; bash tool calls work without prompts.
+- When your implementation is done, you MUST:
+    1. git add <only the files your inbox surface authorized>
+    2. git commit -m "<slice>: <short summary>" (include a Co-Authored-By
+       trailer: "Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>")
+    3. git push -u origin <your branch>
+    4. gh pr create --base codex/ops-team-bootstrap --head <your branch> \\
+         --title "<slice>: <title>" --body "<summary + validation>"
+- DO run validation (pnpm test / pnpm check / pnpm build) if package.json
+  exists in your worktree. If it doesn't, say so and skip.
+- Do NOT push to main. Do NOT merge. Do NOT touch branches other than yours.
 - Do NOT edit files outside the surface named in your inbox.
 
 When you have finished (or are BLOCKED), OVERWRITE ${OUTBOX} with the
@@ -82,7 +90,7 @@ echo "--- inbox ---"
 cat "$INBOX"
 echo "--- launching claude ---"
 claude -p "$PROMPT" \
-  --permission-mode acceptEdits \
+  --permission-mode bypassPermissions \
   2>&1 | tee -a "${LOGDIR}/${ROLE}.log"
 echo "[$(date -Is)] ${ROLE} finished, outbox:"
 echo "--- outbox ---"
