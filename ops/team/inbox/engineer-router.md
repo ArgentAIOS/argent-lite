@@ -1,46 +1,47 @@
-# Task 018 — engineer-router
+# Task 019 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: router-rate-limit
-Branch: codex/router-rate-limit (worktree /home/jason/code/argent-lite-router)
+Slice: router-circuit-breaker
+Branch: codex/router-circuit-breaker (worktree /home/jason/code/argent-lite-router)
 Surface:
 - ops/team/outbox/engineer-router.md
-- src/router/rate-limit.ts
-- tests/router/rate-limit.test.ts
+- src/router/circuit-breaker.ts
+- tests/router/circuit-breaker.test.ts
 
 ## Goal
 
-Add a token-bucket rate limiter wrapper around `Router.route` so the
-Pi doesn't hammer cloud providers.
+Per-provider circuit breaker. When a provider fails N times in a
+row, open the circuit for T seconds — `route()` skips that provider
+during the open window.
 
-1. **`src/router/rate-limit.ts`**:
+1. `src/router/circuit-breaker.ts`:
    ```ts
-   export interface RateLimitOptions {
+   export interface CircuitBreakerOptions {
      inner: Router;
-     tokensPerSec: number;
-     burst: number;           // bucket capacity
+     threshold: number;        // failures before opening, default 5
+     cooldownMs: number;       // open window, default 30000
      now?: () => number;
    }
-   export class RateLimitedError extends Error {
-     readonly retryAfterMs: number;
-     constructor(retryAfterMs: number);
-   }
-   export function withRateLimit(opts: RateLimitOptions): Router;
+   export function withCircuitBreaker(opts: CircuitBreakerOptions): Router;
    ```
-   - Token bucket refills at `tokensPerSec`, cap at `burst`.
-   - `route()` tries to consume 1 token; if none, throws
-     `RateLimitedError` with a computed `retryAfterMs`.
-   - `register(p)` delegates untouched.
-2. **`tests/router/rate-limit.test.ts`** — inject a fake `now`:
-   - Burst of 3 → 3 successful routes, 4th throws.
-   - After advancing time by `1000/tokensPerSec`, next call succeeds.
-   - Sustained burst at exact rate never throws.
-   - `retryAfterMs` is non-negative and decreasing as time advances.
+   - Tracks per-provider failure counts keyed by `providerId`.
+   - On success → reset count to 0.
+   - On failure → increment; if >= threshold, open (record `openedAt`).
+   - On `route()` — if a provider is open and `now() - openedAt < cooldownMs`,
+     treat it as unavailable so the policy falls through.
+   - After cooldown, half-open: next call gets one try; success closes,
+     failure re-opens.
+   - Delegation: keep internal state only; never mutate inner router.
+2. `tests/router/circuit-breaker.test.ts`:
+   - Fake inner with injectable failure sequence.
+   - 5 failures → circuit opens, 6th is skipped.
+   - Cooldown passes (injected clock) → half-open, 1 try.
+   - Success in half-open → closed.
+   - Failure in half-open → re-open.
 
 ## Constraints
 
-- Do NOT touch existing router files.
-- Pure functional clock via injected `now`.
+- Do NOT touch ModelRouter or existing wrappers.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

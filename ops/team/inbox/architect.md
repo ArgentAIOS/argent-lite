@@ -1,23 +1,24 @@
-# Task 018 — architect
+# Task 019 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: deploy-design
-Branch: codex/deploy-design (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/deploy-design.md
+Slice: security-threat-model
+Branch: codex/security-threat-model (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/security-threat-model.md
 
 ## Goal
 
-`ops/projects/deploy-design.md` (≤120 lines): how Argent Lite gets
-deployed to a Pi for continuous operation.
+`ops/projects/security-threat-model.md` (≤150 lines): the security
+threat model for Argent Lite running on a Pi.
 
-1. Packaging: `pnpm build` → `dist/`. Consider `pkg` or `esbuild --bundle` for single-binary.
-2. Systemd unit for persistent run (`argent-lite.service`).
-3. Config location: `/etc/argent-lite/config.json` or `~/.argent-lite/config.json`.
-4. Secrets: `ARGENT_MASTER_KEY` via env file `/etc/default/argent-lite` (mode 0600).
-5. Log rotation: `journald` capture via systemd.
-6. Upgrade path: `git pull && pnpm install && pnpm build && systemctl restart`.
-7. Health check: `systemctl status` + `scripts/phase3-smoke.sh`.
-8. Rollback: previous git tag.
-9. Candidate files: `scripts/install.sh`, `deploy/argent-lite.service`, `deploy/env.example`.
+1. Assets: credentials, memory.sqlite (contains prompts + completions),
+   config, satellite traffic.
+2. Trust boundaries: CLI user, cloud providers, Mac satellite, local OS.
+3. Threats per STRIDE category (spoofing/tampering/repudiation/info-disclosure/DoS/elevation).
+4. Mitigations already shipped: HMAC satellite auth (#31), AES-256-GCM
+   credential file (#3), runtime.ts as sole constructor (#41).
+5. Gaps: no at-rest encryption for memory.sqlite, no secret rotation
+   enforcement, no TLS on satellite HTTP, no log scrubbing.
+6. Priority ordered gap fixes for Phase 5.
+7. Non-goals (what's out of scope for this threat model).
 
 SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.
