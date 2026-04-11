@@ -10,7 +10,7 @@ import {
 } from "../scheduler/index.js";
 
 export interface DemoHelloAgent extends SchedulableAgent {
-  greet(payload: unknown): Promise<string>;
+  greet(name: string): string | Promise<string>;
 }
 
 export interface DemoHelloAgentCtor {
@@ -55,7 +55,7 @@ export async function runDemo(opts: RunDemoOptions = {}): Promise<DemoResult> {
   scheduler.enqueue(task);
   await scheduler.tick();
 
-  const greeting = await agent.greet(payload);
+  const greeting = await Promise.resolve(agent.greet("world"));
   log(`[demo] ${greeting}`);
   return { status: "ok", greeting };
 }

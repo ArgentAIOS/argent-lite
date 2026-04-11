@@ -22,9 +22,8 @@ describe("runDemo", () => {
         calls.push("agent.stop");
         this.state = "stopped";
       }
-      async greet(payload: unknown): Promise<string> {
+      greet(name: string): string {
         calls.push("agent.greet");
-        const name = (payload as { name: string }).name;
         return `hello, ${name}`;
       }
     }
@@ -62,15 +61,10 @@ describe("runDemo", () => {
     tickSpy.mockRestore();
   });
 
-  it("returns skipped and logs the missing-agent line when no ctor is available", async () => {
+  it("uses the real HelloAgent via dynamic import when no ctor is injected", async () => {
     const logs: string[] = [];
-    const result = await runDemo({
-      // Force the dynamic-import branch by passing no ctor; on this slice
-      // src/agents/hello-agent.ts does not exist, so the runner must skip.
-      logger: (line) => logs.push(line),
-    });
-
-    expect(result.status).toBe("skipped");
-    expect(logs).toContain("[demo] HelloAgent not available on this branch");
+    const result = await runDemo({ logger: (line) => logs.push(line) });
+    expect(result.status).toBe("ok");
+    expect(logs.some((l) => l.startsWith("[demo] hello, world"))).toBe(true);
   });
 });
