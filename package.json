@@ -15,7 +15,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint .",
     "format": "prettier -w .",
-    "start": "node --loader tsx/esm src/cli/index.ts"
+    "start": "node --loader tsx/esm src/cli/index.ts",
+    "demo": "node --import tsx src/demo/runner.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
