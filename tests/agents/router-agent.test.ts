@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RouterAgent, RouterAgentError } from "../../src/agents/router-agent.js";
 import { MessageBus } from "../../src/agents/message-bus.js";
 import { createAgentContext } from "../../src/agents/agent-context.js";
+import { createNoopMemory } from "../../src/agents/__fixtures__/noop-memory.js";
 import { withRouter } from "../../src/agents/context-with-router.js";
 import type {
   CompletionRequest,
@@ -23,7 +24,7 @@ function makeRouter(
 function makeHarness(router: Router) {
   const abort = new AbortController();
   const bus = new MessageBus();
-  const base = createAgentContext({ bus, abort: abort.signal });
+  const base = createAgentContext({ bus, abort: abort.signal, memory: createNoopMemory() });
   const ctx = withRouter(base, router);
   const agent = new RouterAgent("router", ctx);
   return { abort, bus, ctx, agent };
@@ -31,9 +32,10 @@ function makeHarness(router: Router) {
 
 describe("RouterAgent", () => {
   it("throws RouterAgentError when ctx has no router", () => {
-    const ctx = createAgentContext();
+    const ctx = createAgentContext({ memory: createNoopMemory() });
     expect(() => new RouterAgent("router", ctx)).toThrow(RouterAgentError);
-    expect(() => new RouterAgent("router", ctx)).toThrow(
+    const ctx2 = createAgentContext({ memory: createNoopMemory() });
+    expect(() => new RouterAgent("router", ctx2)).toThrow(
       "AgentContext missing router",
     );
   });

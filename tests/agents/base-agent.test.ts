@@ -6,6 +6,7 @@ import {
   type AgentContext,
   type AgentMessage,
 } from "../../src/agents/index.js";
+import { createNoopMemory } from "../../src/agents/__fixtures__/noop-memory.js";
 
 class EchoAgent extends BaseAgent {
   public readonly received: AgentMessage[] = [];
@@ -34,7 +35,7 @@ class EchoAgent extends BaseAgent {
 }
 
 function makeCtx(abort: AbortController, bus = new MessageBus()): AgentContext {
-  return createAgentContext({ bus, abort: abort.signal });
+  return createAgentContext({ bus, abort: abort.signal, memory: createNoopMemory() });
 }
 
 describe("BaseAgent", () => {
