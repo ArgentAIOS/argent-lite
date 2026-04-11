@@ -1,33 +1,24 @@
-# Task 014 — architect
+# Task 015 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: phase3-complete
-Branch: codex/phase3-complete (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/phase3-complete.md
-
-## Context
-
-Phase 3 is structurally done as of `codex/ops-team-bootstrap@e683f11`:
-- 189/189 unit tests pass
-- `scripts/phase3-smoke.sh` passes with 3/3 event kinds + stdout reply
-- `bootRuntime()` is the single constructor, `argent chat` works
-- Event vocabulary locked to 5 kinds
+Slice: phase4-roadmap
+Branch: codex/phase4-roadmap (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/phase4-roadmap.md
 
 ## Goal
 
-Write `ops/projects/phase3-complete.md` (≤150 lines):
+`ops/projects/phase4-roadmap.md` (≤120 lines): rough roadmap for
+Phase 4 work beyond the Phase 3 gate. Cover:
 
-1. **Status:** Phase 3 COMPLETE (pending operator sign-off).
-2. **Evidence table:** one row per §7 acceptance criterion from
-   `phase3-acceptance.md` with pass/fail + link to PR or smoke log.
-3. **PR index:** cycles 7–13 with PR numbers grouped by theme
-   (memory, channels, obs, runtime seam, bugfix).
-4. **What's IN main after cycle-13:** bullet list of subsystems live
-   on `codex/ops-team-bootstrap`.
-5. **What's NOT done:** satellite runtime wiring, multi-agent fan-out,
-   LLM-based intents, Hailo real integration (arrives 2026-04-12),
-   retention telemetry. Explicit deferral list.
-6. **Operator sign-off request:** what the operator needs to do to
-   mark Phase 3 closed on `main`.
+1. Deferred items from `phase3-complete.md` — what should land first.
+2. **Satellite runtime wiring**: how the Pi acts as a satellite of a
+   Mac Argent brain, using the HTTP protocol + HMAC auth from PR #31.
+3. **Multi-agent fan-out**: scheduler + topology upgrades to run N
+   concurrent agents.
+4. **Real Hailo integration**: replace the stub once the HAT+ 2 lands.
+5. **Retention telemetry**: surface memory store metrics via obs-metrics.
+6. **Channel file-watch**: the second concrete channel after stdio + http.
+7. Proposed slice order with dependencies.
+8. Risks + open questions.
 
 SELF-COMMIT, PUSH, PR. Deadline: before next cron tick.

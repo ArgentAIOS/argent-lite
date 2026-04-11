@@ -1,101 +1,60 @@
-# Task 014 — engineer-router
+# Task 015 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: public-api-surface
-Branch: codex/public-api-surface (worktree /home/jason/code/argent-lite-router)
+Slice: hailo-provider-real
+Branch: codex/hailo-provider-real (worktree /home/jason/code/argent-lite-router)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-router.md
-- src/index.ts
-- tests/public-api.test.ts
+- src/providers/hailo-live.ts
+- tests/providers/hailo-live.test.ts
 
 ## Context
 
-`src/index.ts` is currently a stub with `export {};`. For Phase 3 wrap,
-the library should expose a coherent public surface so consumers can
-`import { bootRuntime, createLogger, createMetrics } from "@argentaios/argent-lite"`.
+Cycle-4 shipped `src/providers/hailo.ts` (PR #5) as a pure stub that
+always throws. Cycle-7 shipped `src/providers/hailo-runtime.ts`
+(PR #19) with `probeHailo()` that calls `hailortcli fw-control identify`
+via child_process. Hardware arrives 2026-04-12 (tomorrow). Your job:
+write a `HailoLiveProvider` that:
+
+- Probes for hardware at construction time.
+- If hardware is absent, every `complete()` throws `HailoUnavailableError`
+  (exact same error as the stub) — so the router retry path falls
+  through cleanly.
+- If hardware is present, `complete()` spawns `hailortcli run ...`
+  (exact command TBD — use a placeholder subprocess call with the
+  model path from options and stdin prompt, read stdout). If the
+  command fails, throw `HailoUnavailableError` with the stderr.
+- `healthCheck()` re-runs `probeHailo()` and returns the `present` flag.
+
+The hardware integration is best-effort — tomorrow's characterization
+will refine the exact CLI invocation. For today, make the shape
+correct and the tests pass with mocks.
 
 ## Goal
 
-1. **`src/index.ts`** — re-export the public Phase 3 surface:
-   ```ts
-   // Runtime
-   export { bootRuntime, type Runtime, type RuntimeOptions } from "./integration/runtime.js";
-
-   // Agents
-   export { BaseAgent } from "./agents/base-agent.js";
-   export { MessageBus } from "./agents/message-bus.js";
-   export { createAgentContext, type AgentContext } from "./agents/agent-context.js";
-   export { withRouter, type AgentContextWithRouter } from "./agents/context-with-router.js";
-   export { RouterAgent, RouterAgentError } from "./agents/router-agent.js";
-   export { HelloAgent } from "./agents/hello-agent.js";
-   export type { AgentMessage, AgentState, AgentDescriptor } from "./agents/types.js";
-
-   // Scheduler
-   export { Scheduler } from "./scheduler/scheduler.js";
-   export { TaskQueue } from "./scheduler/task-queue.js";
-   export type { SchedulableAgent, ScheduledTask, SchedulerOptions } from "./scheduler/types.js";
-
-   // Router + providers
-   export { ModelRouter, createRouter, instrumentRouter } from "./router/index.js";
-   export { withMemoryLog } from "./router/memory-router.js";
-   export { createDefaultRouter } from "./router/default-router.js";
-   export { routerHealth } from "./router/health.js";
-   export { OllamaProvider } from "./providers/ollama.js";
-   export { AnthropicProvider } from "./providers/anthropic.js";
-   export { OpenAIProvider } from "./providers/openai.js";
-   export { HailoProvider, HailoUnavailableError } from "./providers/hailo.js";
-   export type { Provider, Router, CompletionRequest, CompletionResponse, RoutePolicy } from "./router/types.js";
-
-   // Auth / credentials
-   export { createCredentialStore } from "./auth/index.js";
-   export type { CredentialStore, ProviderId } from "./auth/types.js";
-
-   // Memory
-   export { createMemoryStore } from "./memory/store.js";
-   export { withRetention } from "./memory/retention.js";
-   export type { MemoryStore, MemoryEvent } from "./memory/types.js";
-
-   // Channels
-   export { CliStdioChannel } from "./channels/cli-stdio.js";
-   export { HttpChannel } from "./channels/http.js";
-   export type { Channel, ChannelOptions } from "./channels/types.js";
-
-   // Intents
-   export { createIntentRouter } from "./intents/router.js";
-   export type { IntentRouter, IntentHandler } from "./intents/types.js";
-
-   // Observability
-   export { createLogger } from "./obs/logger.js";
-   export { createMetrics } from "./obs/metrics.js";
-   export type { Logger, Metrics, MetricsSnapshot } from "./obs/types.js";
-
-   // Runtime vocabulary
-   export { EVENT_KINDS, isEventKind, assertEventKind, type EventKind } from "./runtime/event-kinds.js";
-
-   // Mode
-   export { loadMode, type RuntimeMode } from "./config/mode.js";
-   ```
-   Adjust any names if a cited export doesn't exist in the current
-   tree — **verify each re-export by reading the referenced file**
-   before adding it. If an export is missing, flag it in the outbox
-   but don't invent it.
-2. **`tests/public-api.test.ts`** — imports each named export from
-   `"../src/index.js"` and asserts they are defined. This is the
-   "public surface lock" test — future removals need an explicit
-   update.
+1. **`src/providers/hailo-live.ts`** — `HailoLiveProvider` class
+   implementing the `Provider` interface:
+   - Constructor: `{ modelPath: string; probe?: () => Promise<{present: boolean}>; runCli?: (args: string[], input: string) => Promise<{stdout: string; stderr: string; exitCode: number}> }`.
+     Both `probe` and `runCli` are injected for testing; default to the
+     real implementations via dynamic imports of `./hailo-runtime.js`
+     and `node:child_process`.
+   - `id = "hailo-live"`, `kind = "local"`.
+   - `complete(req)`: probe; if absent, throw. Else run cli with
+     `["run", modelPath, "--input", req.prompt]` (placeholder);
+     parse stdout as the completion text.
+   - `healthCheck()`: returns probe's present flag.
+2. **`tests/providers/hailo-live.test.ts`** — mock both `probe` and
+   `runCli`:
+   - probe returns `{present: false}` → `complete()` throws `HailoUnavailableError`.
+   - probe returns `{present: true}`, runCli succeeds → `complete()` returns expected text.
+   - probe returns `{present: true}`, runCli exits non-zero → throws with stderr.
+   - `healthCheck()` reflects probe result.
 
 ## Constraints
 
-- Read each module to verify export names before re-exporting.
-- Do NOT add new functionality — only re-exports.
-- If an export name is wrong, fix the re-export to match reality;
-  do NOT edit the source module.
+- Do NOT touch `src/providers/hailo.ts` or `hailo-runtime.ts` or
+  `hailo-capabilities.ts`. New file only.
+- No new deps.
 - Strict TS, no `any`.
 
-## Acceptance criterion
-
-- `src/index.ts` re-exports the full public surface.
-- `pnpm check` and `pnpm test tests/public-api.test.ts` pass.
-- SELF-COMMIT, PUSH, PR.
-
-## Deadline: before next cron tick.
+## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

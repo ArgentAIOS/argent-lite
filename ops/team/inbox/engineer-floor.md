@@ -1,40 +1,35 @@
-# Task 014 — engineer-floor
+# Task 015 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: phase3-registry-update
-Branch: codex/phase3-registry-update (worktree /home/jason/code/argent-lite-floor)
-Surface (WRITE authorized — nothing else):
+Slice: ci-run-verify
+Branch: codex/ci-run-verify (worktree /home/jason/code/argent-lite-floor)
+Surface:
 - ops/team/outbox/engineer-floor.md
-- ops/slices/REGISTRY.md
-- ops/projects/ACTIVE.md
-- ops/team/JOURNAL.md                       (create if missing)
-- README.md                                  (light touch only — add a "status" line)
+- .github/workflows/ci.yml                  (fix if needed)
+- docs/ci-status.md
 
 ## Goal
 
-Update the operational state files so REGISTRY/ACTIVE/JOURNAL reflect
-the real state after cycles 7–13.
-
-1. **`ops/slices/REGISTRY.md`** — add every cycle-7 through cycle-13
-   slice to the Completed Slices table with PR numbers. Active Slices
-   should only contain `ops-team-bootstrap` (integration branch) and
-   any still-in-progress work.
-2. **`ops/projects/ACTIVE.md`** — mark "Argent Lite Phase 1" and
-   "Phase 2 scaffold" complete; mark "Phase 3 implementation" as
-   complete-pending-sign-off; add "Phase 3 sign-off" row.
-3. **`ops/team/JOURNAL.md`** — create if missing. Append a single
-   dated entry `2026-04-11` summarizing: 13 cycles run, 45 PRs,
-   189 tests, Phase 3 stub smoke green, Pi load constraint.
-4. **`README.md`** — add a single status line near the top:
-   `**Status:** Phase 3 structurally complete at cycle-13
-   (`codex/ops-team-bootstrap@e683f11`). See
-   `ops/projects/phase3-complete.md`.`
-   Do not rewrite the README.
+1. Run `gh run list --branch codex/ops-team-bootstrap --limit 5` —
+   check what the latest CI workflow run did.
+2. If the workflow hasn't run at all, trigger one via `gh workflow run ci.yml --ref codex/ops-team-bootstrap` or push a trivial empty commit with a `[ci]` tag via something you're authorized to write to (you can push to codex/ci-run-verify).
+3. If a run exists and failed, READ the failure logs with `gh run view <id> --log-failed`, diagnose, and fix `.github/workflows/ci.yml` if the issue is in the workflow (not in the code — do not touch src/**). Retry.
+4. Document findings in `docs/ci-status.md`:
+   - last run id + conclusion (success/failure/in-progress)
+   - any fixes you applied
+   - expected green path
+5. Update `docs/ci-status.md` is a new file; feel free to write it fresh.
 
 ## Constraints
 
-- Do NOT touch `src/**` or other `ops/projects/*.md`.
-- README: minimal diff.
+- Do NOT touch `src/**`, `tests/**`, `package.json`, `tsconfig.json`.
+- You can edit `.github/workflows/ci.yml` only if a fix is needed.
 - Strict Markdown, no broken links.
 
-## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
+## Acceptance criterion
+
+- `docs/ci-status.md` exists and describes current CI state.
+- A green CI run exists on codex/ci-run-verify OR a clear "cannot trigger without maintainer action" note.
+- SELF-COMMIT, PUSH, PR.
+
+## Deadline: before next cron tick.
