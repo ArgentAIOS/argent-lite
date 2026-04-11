@@ -12,6 +12,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint .",
     "format": "prettier -w .",
     "start": "node --loader tsx/esm src/cli/index.ts"
