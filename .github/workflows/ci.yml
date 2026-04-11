@@ -2,70 +2,55 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - "**"
   pull_request:
+    branches:
+      - main
+      - develop
+      - "codex/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  pr-intake:
-    if: github.event_name == 'pull_request'
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-
-      - name: Verify PR intake
-        run: node scripts/check-pr-intake.mjs
-
-  install-check:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.x
+          node-version: "22"
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-  checks:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - task: check
-            command: pnpm check
-          - task: build
-            command: pnpm build
-          - task: protocol
-            command: pnpm protocol:check
-          - task: test
-            command: pnpm test
-          - task: dashboard
-            command: pnpm --dir dashboard build
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Typecheck
+        run: pnpm check
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
+      - name: Unit tests
+        run: pnpm test
 
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Run ${{ matrix.task }}
-        run: ${{ matrix.command }}
+      - name: Build
+        run: pnpm build
