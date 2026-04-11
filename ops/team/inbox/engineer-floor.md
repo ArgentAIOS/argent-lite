@@ -1,45 +1,62 @@
-# Task 016 — engineer-floor
+# Task 017 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: channel-file-watch
-Branch: codex/channel-file-watch (worktree /home/jason/code/argent-lite-floor)
+Slice: config-loader-impl
+Branch: codex/config-loader-impl (worktree /home/jason/code/argent-lite-floor)
 Surface:
 - ops/team/outbox/engineer-floor.md
-- src/channels/file-watch.ts
-- tests/channels/file-watch.test.ts
+- src/config/loader.ts
+- src/config/schema.ts
+- tests/config/loader.test.ts
 
 ## Goal
 
-Third concrete channel: file-watch. Reads prompts from a file,
-delivers each new line as a prompt to an agent, writes replies to a
-sibling output file.
+Implement the config loader.
 
-1. `src/channels/file-watch.ts` — `FileWatchChannel` implementing the
-   `Channel` interface:
-   - Constructor: `{ agentId, bus, inPath, outPath, now? }`.
-   - `start()`:
-     - Opens `inPath` for reading with `fs.promises.open`, seeks to end.
-     - Polls the file every 500ms via `fs.stat` to detect new bytes
-       (no fs.watch — too platform-dependent). Reads any new content
-       via byte offset tracking.
-     - For each newline-terminated line, sends a prompt message to
-       the bus.
-     - Subscribes to `"cli"` (or a configurable replyTo id) for
-       completion replies and appends them to `outPath`.
-   - `stop()`: clears the interval, closes files, unsubscribes.
-2. `tests/channels/file-watch.test.ts`:
-   - Uses `os.tmpdir()` + `fs.promises.mkdtemp` for isolation.
-   - Creates in/out files, starts channel, appends a line to in,
-     waits ~700ms, asserts bus received a prompt message.
-   - Fakes a completion reply on the bus, asserts out file has the text.
-   - Stops the channel, asserts polling stopped (no more bus messages
-     after another file write).
+1. **`src/config/schema.ts`**:
+   ```ts
+   export interface ArgentConfig {
+     mode: "satellite" | "standalone";
+     memoryPath?: string;
+     logLevel: "debug" | "info" | "warn" | "error";
+     providers: string[];           // allowlist: "ollama" | "anthropic" | "openai" | "hailo"
+     channels: string[];            // enabled: "cli-stdio" | "http" | "file-watch"
+     httpChannel?: { port: number; host: string };
+     satellite?: { secret: string; host: string };
+   }
+   export const DEFAULT_CONFIG: ArgentConfig = { ... };
+   ```
+2. **`src/config/loader.ts`**:
+   ```ts
+   export interface LoadConfigOptions {
+     argv?: string[];
+     env?: NodeJS.ProcessEnv;
+     configPath?: string;
+     readFile?: (p: string) => string | undefined;
+   }
+   export function loadConfig(opts?: LoadConfigOptions): ArgentConfig;
+   ```
+   - Precedence: CLI flags > env vars > config file > `DEFAULT_CONFIG`.
+   - Env vars: `ARGENT_MODE`, `ARGENT_HOME`, `ARGENT_LOG_LEVEL`,
+     `ARGENT_PROVIDERS` (comma-separated), `ARGENT_CHANNELS`,
+     `ARGENT_HTTP_PORT`, `ARGENT_HTTP_HOST`, `ARGENT_SATELLITE_SECRET`,
+     `ARGENT_SATELLITE_HOST`.
+   - CLI flags: `--mode`, `--log-level`, `--providers`, `--channels`, etc.
+   - Config file: JSON at `~/.argent-lite/config.json` (path overridable).
+   - Strict validation: unknown mode/provider/channel throws `ConfigError`.
+3. **`tests/config/loader.test.ts`**:
+   - Default when nothing given.
+   - Env var override.
+   - CLI flag overrides env.
+   - Config file is below env.
+   - Invalid mode throws.
+   - Unknown provider throws.
+   - Readfile injected (no real fs).
 
 ## Constraints
 
-- Pure poll-based; no `fs.watch`.
+- Do NOT touch `src/config/mode.ts` — this is additive.
 - Node built-ins only.
-- Do NOT touch other channels or agents.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

@@ -1,48 +1,49 @@
-# Task 016 — engineer-router
+# Task 017 — engineer-router
 
 Contract: ops/contracts/engineer-router.contract.md
-Slice: scheduler-concurrent
-Branch: codex/scheduler-concurrent (worktree /home/jason/code/argent-lite-router)
+Slice: router-cost-policy
+Branch: codex/router-cost-policy (worktree /home/jason/code/argent-lite-router)
 Surface:
 - ops/team/outbox/engineer-router.md
-- src/scheduler/concurrent.ts
-- tests/scheduler/concurrent.test.ts
+- src/router/cost-policy.ts
+- tests/router/cost-policy.test.ts
 
 ## Goal
 
-A scheduler upgrade: run N agents concurrently with a hard ceiling.
+Implement a concrete cost-aware routing strategy. Today
+`selectProviders` has a `"cost"` enum value but no implementation.
 
-1. `src/scheduler/concurrent.ts`:
+1. **`src/router/cost-policy.ts`**:
    ```ts
-   export interface ConcurrentSchedulerOptions {
-     maxConcurrent?: number;  // default 4
-     now?: () => number;
+   export interface ProviderCost {
+     providerId: string;
+     costPerToken: number;  // USD per output token, 0 for local
+     latencyMsP50: number;  // rough p50 observed
    }
-   export class ConcurrentScheduler {
-     constructor(opts?: ConcurrentSchedulerOptions);
-     register(agent: SchedulableAgent): void;
-     enqueue(task: ScheduledTask): void;
-     tick(): Promise<void>;
-     stop(): Promise<void>;
-     active(): number;  // count of currently-running agents
+   export interface CostPolicyOptions {
+     costs: ProviderCost[];
+     maxTokensBudget?: number;   // skip if prompt exceeds
+     preferLocal?: boolean;      // default true — break ties in favor of cost=0
    }
+   export function selectByCost(
+     providers: Provider[],
+     policy: CostPolicyOptions,
+   ): Provider[];
    ```
-   - Tracks in-flight tasks in a Map keyed by agent id.
-   - `tick()` pulls due tasks from an internal queue, dispatches to
-     agent, honors `maxConcurrent`.
-   - `stop()` waits for all in-flight to complete.
-   - `active()` returns the count at call time.
-2. `tests/scheduler/concurrent.test.ts`:
-   - Register 3 mock agents; enqueue 5 tasks with `maxConcurrent: 2`.
-   - Assert only 2 run concurrently; the 3rd starts after one finishes.
-   - `stop()` resolves only after in-flight finish.
-   - Agent crash does not block the scheduler.
+   - Returns a sorted list of providers by (cost asc, latency asc),
+     filtered to providers present in both lists.
+   - `preferLocal` means all cost-0 providers come first.
+2. **`tests/router/cost-policy.test.ts`**:
+   - 3 providers with different costs → sorted ascending.
+   - Tiebreaker on latency.
+   - `preferLocal` puts cost-0 first even if latency worse.
+   - Empty providers → empty output.
+   - Missing cost entry → provider omitted.
 
 ## Constraints
 
-- Do NOT touch `src/scheduler/scheduler.ts` — this is a **new** class.
-- Node built-ins only.
-- Use a fake clock for determinism (inject `now` + delay via mocks).
+- Do NOT touch `src/router/policy.ts`, `router.ts`, `types.ts` — new file only.
+- `import type` for `Provider` from `./types.js`.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

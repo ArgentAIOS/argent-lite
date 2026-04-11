@@ -1,46 +1,49 @@
-# Task 016 — engineer-auth
+# Task 017 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: memory-telemetry
-Branch: codex/memory-telemetry (worktree /home/jason/code/argent-lite-auth)
+Slice: credential-rotation
+Branch: codex/credential-rotation (worktree /home/jason/code/argent-lite-auth)
 Surface:
 - ops/team/outbox/engineer-auth.md
-- src/memory/telemetry.ts
-- tests/memory/telemetry.test.ts
+- src/auth/rotation.ts
+- tests/auth/rotation.test.ts
 
 ## Goal
 
-Add telemetry wrapping for `MemoryStore` that records counters +
-latency histograms on every operation.
+Add credential rotation support to the `CredentialStore` interface.
 
-1. `src/memory/telemetry.ts`:
+1. **`src/auth/rotation.ts`**:
    ```ts
-   export interface MemoryTelemetryOptions {
-     inner: MemoryStore;
-     metrics: Metrics;    // injected, interface-only import
-     logger?: Logger;     // optional
+   export interface RotationOptions {
+     inner: CredentialStore;
      now?: () => number;
+     maxAgeMs?: number;   // default 30 days
    }
-   export function withTelemetry(opts: MemoryTelemetryOptions): MemoryStore;
+   export interface RotatingCredentialStore extends CredentialStore {
+     lastRotated(providerId: string): Promise<number | undefined>;
+     stale(providerId: string, maxAgeMs?: number): Promise<boolean>;
+     markRotated(providerId: string): Promise<void>;
+   }
+   export function withRotation(opts: RotationOptions): RotatingCredentialStore;
    ```
-   - Returns a MemoryStore wrapper.
-   - Every method increments `memory.op.total` with a `op` label
-     (get/set/list/append/query/close).
-   - Every method observes `memory.op.latency_ms` with the same `op` label.
-   - On error: `memory.op.errors` counter, plus `logger.error("memory.op.error", ...)` if logger provided.
-   - All events flow through — never swallow errors, always rethrow.
-2. `tests/memory/telemetry.test.ts`:
-   - Wrap an in-memory fake MemoryStore.
-   - Call each method, assert counters/histograms via
-     `metrics.snapshot()`.
-   - Verify error propagation: inner throws → telemetry wrapper
-     counts error + rethrows.
-   - Verify close() increments + is idempotent.
+   - Wraps an existing store, layers a rotation timestamp on top.
+   - Timestamps are stored as `${providerId}:rotated-at` keys via the
+     inner store's `set`/`get` so persistence is automatic.
+   - `stale()` returns true if no rotation timestamp exists or if
+     `now() - lastRotated > maxAgeMs`.
+2. **`tests/auth/rotation.test.ts`**:
+   - Start with an in-memory fake `CredentialStore` (build a minimal
+     one in the test file; do NOT touch src/auth/**).
+   - `set(provider, secret)` → rotation timestamp exists afterward.
+   - `stale()` returns true for a provider never rotated.
+   - `stale()` returns false immediately after rotation.
+   - `stale()` returns true after simulated time passes via injected `now`.
+   - `markRotated()` resets the timestamp.
 
 ## Constraints
 
-- `import type` for `MemoryStore`, `Metrics`, `Logger`.
-- Do NOT touch `src/memory/**` other than the new file.
+- Do NOT touch existing `src/auth/**` files. Add only `rotation.ts`.
+- Node built-ins only.
 - Strict TS, no `any`.
 
 ## Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.

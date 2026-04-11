@@ -1,13 +1,13 @@
-# Task 016 — reviewer
+# Task 017 — reviewer
 
 Single pass, outbox only. NO commit. NO PR.
 
 Branches:
-- codex/multi-agent-design
-- codex/channel-file-watch
-- codex/memory-telemetry
-- codex/scheduler-concurrent
+- codex/config-loader-design
+- codex/config-loader-impl
+- codex/credential-rotation
+- codex/router-cost-policy
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle16-review
+Slice: cycle17-review
 Deadline: ≤5 minutes.
