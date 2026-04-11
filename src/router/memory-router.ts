@@ -47,7 +47,7 @@ export function withMemoryLog(opts: MemoryRouterOptions): Router {
     async route(req: CompletionRequest): Promise<CompletionResponse> {
       try {
         const res = await inner.route(req);
-        await safeAppend("router.route", {
+        await safeAppend("router.out", {
           req,
           providerId: res.providerId,
           model: res.model,
@@ -55,7 +55,7 @@ export function withMemoryLog(opts: MemoryRouterOptions): Router {
         return res;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        await safeAppend("router.error", { req, error: message });
+        await safeAppend("agent.error", { req, error: message });
         throw err;
       }
     },

@@ -92,3 +92,30 @@ Do not add kinds inside an unrelated implementation slice.
 - Satellite-mode federation events are out of scope for Phase 3 and
   will be specified in a separate vocabulary doc if/when satellite
   federation lands.
+
+## 6. 2026-04-11 reconciliation
+
+Threadmaster's Phase 3 §4 smoke revealed the vocabulary was split across
+three call sites:
+
+- `src/router/memory-router.ts` was writing pre-lock draft kinds
+  `router.route` (success) and `router.error` (failure).
+- `src/runtime/event-kinds.ts` (cycle-12 lock, PR #38) defines the
+  canonical set as `channel.in`, `channel.out`, `router.in`,
+  `router.out`, `agent.error`.
+- `src/integration/runtime.ts` fallback allowlist — used only when the
+  real `event-kinds` module fails to resolve — still listed the old
+  draft kinds `router.route` and `router.error`, so the fallback and
+  the lock disagreed.
+
+**Resolution (slice `event-kind-reconcile`):** the cycle-12 lock is
+the published contract. `memory-router.ts` now emits `router.out` on
+the success path and `agent.error` on the failure path, matching
+§2's "No `router.error`" rule and the success-only semantics of
+`router.out`. The `integration/runtime.ts` fallback allowlist was
+replaced with the exact 5-kind set from `event-kinds.ts` so both paths
+enforce the same vocabulary. Tests in `tests/router/memory-router.test.ts`
+and a new regression in `tests/runtime/event-kinds.test.ts` pin the
+old draft names `router.route` and `router.error` as rejected by
+`isEventKind`.
+

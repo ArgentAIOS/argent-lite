@@ -54,7 +54,7 @@ function innerThrow(err: Error): Router & {
 }
 
 describe("withMemoryLog", () => {
-  it("appends a router.route event with req, providerId, model on success", async () => {
+  it("appends a router.out event with req, providerId, model on success", async () => {
     const res: CompletionResponse = {
       text: "hello",
       model: "gemma3:1b",
@@ -80,7 +80,7 @@ describe("withMemoryLog", () => {
     expect(memory.append).toHaveBeenCalledWith("router-a", {
       id: "evt-1",
       ts: 1234,
-      kind: "router.route",
+      kind: "router.out",
       payload: { req, providerId: "ollama", model: "gemma3:1b" },
     });
   });
@@ -96,7 +96,7 @@ describe("withMemoryLog", () => {
     expect(memory.append.mock.calls[0]?.[0]).toBe("router");
   });
 
-  it("appends a router.error event and rethrows when inner throws", async () => {
+  it("appends an agent.error event and rethrows when inner throws", async () => {
     const err = new Error("boom");
     const inner = innerThrow(err);
     const memory = fakeMemory();
@@ -114,7 +114,7 @@ describe("withMemoryLog", () => {
     expect(memory.append).toHaveBeenCalledWith("router", {
       id: "evt-err",
       ts: 99,
-      kind: "router.error",
+      kind: "agent.error",
       payload: { req, error: "boom" },
     });
   });
@@ -136,7 +136,7 @@ describe("withMemoryLog", () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error.mock.calls[0]?.[0]).toBe("memory-router.append");
     expect(logger.error.mock.calls[0]?.[1]).toMatchObject({
-      kind: "router.route",
+      kind: "router.out",
       error: "memory down",
     });
   });
@@ -155,7 +155,7 @@ describe("withMemoryLog", () => {
     expect(append).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error.mock.calls[0]?.[1]).toMatchObject({
-      kind: "router.error",
+      kind: "agent.error",
     });
   });
 
