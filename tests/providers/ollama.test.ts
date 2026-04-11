@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { OllamaProvider } from "../../src/providers/ollama.js";
 
 function makeFetch(body: unknown, ok = true, status = 200) {
-  return vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+  return vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
     return {
       ok,
       status,
