@@ -200,6 +200,30 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     for (const { providerId, secret } of secrets) {
       await store.set(providerId, secret);
     }
+
+    // ── Sync keys to argentos-core gateway auth-profiles.json ──────────
+    // The argentos-core gateway uses its own auth-profiles.json per agent
+    // directory. If the gateway agent dir exists, write the same keys
+    // there so the operator doesn't have to configure them twice.
+    const gatewayAgentDir = join(
+      homedir(),
+      ".argentos-dev",
+      "agents",
+      "dev",
+      "agent",
+    );
+    try {
+      await syncGatewayAuthProfiles(
+        gatewayAgentDir,
+        secrets,
+        writeFile,
+        prompter,
+      );
+    } catch {
+      // Best-effort — if the gateway dir doesn't exist or the write
+      // fails, it's not blocking. The operator can configure the
+      // gateway separately.
+    }
   }
 
   let satelliteConfig: { baseUrl: string; secret: string } | undefined;
@@ -249,4 +273,56 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
     mode,
     generatedMasterKey,
   };
+}
+
+
+// ── Gateway auth-profiles sync ─────────────────────────────────────────────
+
+/** Map argent-lite provider IDs to argentos-core gateway provider names + default models. */
+const GATEWAY_PROVIDER_MAP: Record<
+  string,
+  { provider: string; model: string } | undefined
+> = {
+  groq: { provider: "groq", model: "llama-3.1-8b-instant" },
+  openrouter: { provider: "openrouter", model: "meta-llama/llama-3.1-8b-instruct" },
+  anthropic: { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
+  openai: { provider: "openai", model: "gpt-4o-mini" },
+  "zai-coder": { provider: "zai", model: "glm-4.6" },
+  "zai-api": { provider: "zai", model: "glm-4.6" },
+};
+
+async function syncGatewayAuthProfiles(
+  agentDir: string,
+  secrets: Array<{ providerId: string; secret: string }>,
+  writeFileFn: (path: string, content: string) => Promise<void>,
+  prompter: Prompter,
+): Promise<void> {
+  if (!existsSync(agentDir)) {
+    // Gateway agent dir doesn't exist — gateway not installed. Skip quietly.
+    return;
+  }
+
+  const profiles = secrets
+    .filter((s) => GATEWAY_PROVIDER_MAP[s.providerId] != null)
+    .map((s, i) => {
+      const mapping = GATEWAY_PROVIDER_MAP[s.providerId]!;
+      return {
+        id: `${s.providerId}-auto`,
+        provider: mapping.provider,
+        model: mapping.model,
+        apiKey: s.secret,
+        default: i === 0,
+        active: true,
+      };
+    });
+
+  if (profiles.length === 0) return;
+
+  const filePath = join(agentDir, "auth-profiles.json");
+  const content = JSON.stringify({ profiles }, null, 2) + "\n";
+
+  await mkdir(agentDir, { recursive: true });
+  await writeFileFn(filePath, content);
+
+  prompter.print(`  gateway auth: ${filePath} (${profiles.length} profiles synced)`);
 }
