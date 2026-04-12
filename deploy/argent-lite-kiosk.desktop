@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Argent Lite Kiosk
+Comment=Full-screen Argent Lite kiosk UI (walk-up satellite)
+Exec=chromium --kiosk --noerrdialogs --disable-infobars http://127.0.0.1:7788
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;
+StartupNotify=false
