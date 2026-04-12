@@ -20,14 +20,171 @@ HWMON_NVME_TEMP = "/sys/class/hwmon/hwmon1/temp1_input"
 # Use "url" for HTTP probes or "systemd" for unit checks.
 SERVICES = [
     {"name": "argentos-core", "type": "API", "url": "http://127.0.0.1:8000/health"},
+    {"name": "argentos-gateway", "type": "WS", "tcp": ("127.0.0.1", 18789)},
+    {"name": "argentos-desktop", "type": "Web", "tcp": ("127.0.0.1", 8080)},
     # argent-lite listeners (loopback-only, phase-gated — down until deployed):
     {"name": "argent-desktop-ui", "type": "Web", "tcp": ("127.0.0.1", 7787)},
     {"name": "argent-kiosk/satellite", "type": "Gateway", "tcp": ("127.0.0.1", 7788)},
     {"name": "ollama", "type": "API", "url": "http://127.0.0.1:11434/"},
-    # {"name": "argent-lite chat", "type": "Service", "systemd": "argent-lite-chat.service"},
 ]
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# Argent Lite + ArgentOS Gateway systemd unit control. Dev: user unit under
+# jason; prod: system unit. Scope auto-detects at boot per unit name.
+ARGENT_LITE_UNIT = "argent-lite.service"
+ARGENT_GATEWAY_UNIT = "argent-gateway.service"
+ARGENT_LITE_USER = "jason"
+ARGENT_LITE_UID = "1000"
+
+
+def _unit_scope(unit_name):
+    """Return 'system' if a system unit exists for this name, else 'user'."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "list-unit-files", unit_name],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and unit_name in r.stdout:
+            return "system"
+    except Exception:
+        pass
+    return "user"
+
+
+ARGENT_LITE_SCOPE = _unit_scope(ARGENT_LITE_UNIT)
+ARGENT_GATEWAY_SCOPE = _unit_scope(ARGENT_GATEWAY_UNIT)
+
+
+def _unit_cmd(action, unit_name, scope):
+    """Build a systemctl argv for the detected scope. Works from root."""
+    if scope == "system":
+        return ["systemctl", action, unit_name]
+    return [
+        "sudo", "-u", ARGENT_LITE_USER, "-E",
+        "env",
+        f"XDG_RUNTIME_DIR=/run/user/{ARGENT_LITE_UID}",
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{ARGENT_LITE_UID}/bus",
+        "systemctl", "--user", action, unit_name,
+    ]
+
+
+def _argent_lite_cmd(action):
+    return _unit_cmd(action, ARGENT_LITE_UNIT, ARGENT_LITE_SCOPE)
+
+
+def _argent_gateway_cmd(action):
+    return _unit_cmd(action, ARGENT_GATEWAY_UNIT, ARGENT_GATEWAY_SCOPE)
+
+
+def argent_lite_status():
+    """Return {active, sub, pid, uptime_s} for the argent-lite unit."""
+    try:
+        argv = _argent_lite_cmd("show")
+        # Replace the action verb for show — need property args
+        argv[argv.index("show")] = "show"
+        argv += ["-p", "ActiveState", "-p", "SubState", "-p", "MainPID",
+                 "-p", "ExecMainStartTimestampMonotonic"]
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        if r.returncode != 0:
+            return {"active": "unknown", "sub": "error", "pid": 0,
+                    "uptime_s": 0, "scope": ARGENT_LITE_SCOPE,
+                    "unit": ARGENT_LITE_UNIT, "error": r.stderr.strip()[:200]}
+        props = {}
+        for line in r.stdout.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                props[k] = v
+        pid = int(props.get("MainPID", "0") or "0")
+        uptime_s = 0
+        if pid > 0:
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    start_ticks = int(f.read().split()[21])
+                with open("/proc/uptime") as f:
+                    sys_uptime = float(f.read().split()[0])
+                hz = os.sysconf("SC_CLK_TCK")
+                uptime_s = int(sys_uptime - start_ticks / hz)
+            except Exception:
+                pass
+        return {
+            "active": props.get("ActiveState", "unknown"),
+            "sub": props.get("SubState", "unknown"),
+            "pid": pid,
+            "uptime_s": uptime_s,
+            "scope": ARGENT_LITE_SCOPE,
+            "unit": ARGENT_LITE_UNIT,
+        }
+    except Exception as e:
+        return {"active": "error", "sub": "error", "pid": 0, "uptime_s": 0,
+                "scope": ARGENT_LITE_SCOPE, "unit": ARGENT_LITE_UNIT,
+                "error": str(e)[:200]}
+
+
+def argent_lite_action(action):
+    """start | stop | restart the argent-lite unit. Returns {ok, code, stderr}."""
+    if action not in ("start", "stop", "restart"):
+        return {"ok": False, "error": "invalid action"}
+    try:
+        argv = _argent_lite_cmd(action)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        return {
+            "ok": r.returncode == 0,
+            "code": r.returncode,
+            "stderr": r.stderr.strip()[:400],
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def argent_gateway_status():
+    """Return gateway unit state + port-alive flag."""
+    status = {"active": "unknown", "sub": "unknown", "pid": 0,
+              "scope": ARGENT_GATEWAY_SCOPE, "unit": ARGENT_GATEWAY_UNIT,
+              "port_listening": False}
+    try:
+        argv = _argent_gateway_cmd("show")
+        argv[argv.index("show")] = "show"
+        argv += ["-p", "ActiveState", "-p", "SubState", "-p", "MainPID"]
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            props = {}
+            for line in r.stdout.splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    props[k] = v
+            status["active"] = props.get("ActiveState", "unknown")
+            status["sub"] = props.get("SubState", "unknown")
+            status["pid"] = int(props.get("MainPID", "0") or "0")
+    except Exception as e:
+        status["error"] = str(e)[:200]
+    # TCP probe on 18789 regardless of unit state (may be running outside systemd)
+    try:
+        with socket.create_connection(("127.0.0.1", 18789), timeout=0.5):
+            status["port_listening"] = True
+    except Exception:
+        pass
+    return status
+
+
+def argent_gateway_action(action):
+    """start | stop | restart the gateway unit."""
+    if action not in ("start", "stop", "restart"):
+        return {"ok": False, "error": "invalid action"}
+    try:
+        argv = _argent_gateway_cmd(action)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        return {
+            "ok": r.returncode == 0,
+            "code": r.returncode,
+            "stderr": r.stderr.strip()[:400],
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
 
 
 def read(path, default=None):
@@ -248,6 +405,8 @@ def gather():
         "info": STATIC_INFO,
         "updates": dict(UPDATES),
         "services": probe_services(),
+        "argent_lite": argent_lite_status(),
+        "argent_gateway": argent_gateway_status(),
         "ts": int(time.time()),
     }
 
@@ -299,7 +458,8 @@ INDEX = r"""<!doctype html>
  .bar.hot>i{background:linear-gradient(90deg,#f97316,#ef4444);box-shadow:0 0 20px rgba(239,68,68,.5);}
  .btn{padding:7px 12px;border-radius:10px;font-size:12px;font-weight:500;
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#e6edf7;
-  transition:all .15s;cursor:pointer;}
+  transition:all .15s;cursor:pointer;display:inline-block;text-decoration:none;}
+ a.btn{color:#e6edf7;}
  .btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2);}
  .btn-primary{background:linear-gradient(135deg,#22d3ee,#a855f7);border-color:transparent;}
  .btn-primary:hover{filter:brightness(1.1);}
@@ -325,7 +485,14 @@ INDEX = r"""<!doctype html>
   </h1>
   <div class="sub mt-1"><span id="hdr_host">—</span> · <span id="hdr_model">—</span></div>
  </div>
- <div class="flex items-center gap-2">
+ <div class="flex items-center gap-2 flex-wrap">
+  <a id="btn_desktop" class="btn btn-primary" href="http://localhost:8080" target="_blank" rel="noopener"
+     title="Open ArgentOS Desktop (React UI) at :8080">
+   ArgentOS Desktop
+  </a>
+  <button class="btn" onclick="launchKiosk()" title="Kiosk Mode — ships cycle-21">
+   Kiosk
+  </button>
   <span class="chip"><span class="dot live" style="background:#34d399;color:#34d399;"></span>live</span>
   <span class="chip"><span class="k">updated</span> <span id="ts" class="k">—</span></span>
  </div>
@@ -426,6 +593,49 @@ INDEX = r"""<!doctype html>
   </div>
  </div>
 
+ <div class="glass p-5 sm:col-span-2 lg:col-span-2">
+  <div class="flex items-center justify-between">
+   <div class="lbl">Argent Lite Runtime</div>
+   <span class="k text-xs" id="al_scope">—</span>
+  </div>
+  <div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+   <div class="text-slate-400">State</div>
+   <div><span class="inline-block w-2 h-2 rounded-full mr-1 align-middle" id="al_dot" style="background:#64748b"></span><span class="k" id="al_state">unknown</span></div>
+   <div class="text-slate-400">Unit</div>   <div class="k truncate" id="al_unit">—</div>
+   <div class="text-slate-400">PID</div>    <div class="k" id="al_pid">—</div>
+   <div class="text-slate-400">Uptime</div> <div class="k" id="al_uptime">—</div>
+  </div>
+  <div class="mt-4 flex flex-wrap gap-2">
+   <button class="btn btn-primary" onclick="alAction('start')">Start</button>
+   <button class="btn" onclick="alAction('stop')">Stop</button>
+   <button class="btn" onclick="alAction('restart')">Restart</button>
+  </div>
+  <div class="mt-2 text-[11px] text-slate-500" id="al_msg">&nbsp;</div>
+
+  <div class="mt-4 pt-4 border-t border-white/10">
+   <div class="flex items-center justify-between">
+    <div class="lbl">ArgentOS Gateway</div>
+    <span class="k text-xs" id="gw_scope">—</span>
+   </div>
+   <div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+    <div class="text-slate-400">State</div>
+    <div><span class="inline-block w-2 h-2 rounded-full mr-1 align-middle" id="gw_dot" style="background:#64748b"></span><span class="k" id="gw_state">unknown</span></div>
+    <div class="text-slate-400">Unit</div>   <div class="k truncate" id="gw_unit">—</div>
+    <div class="text-slate-400">Port 18789</div> <div class="k" id="gw_port">—</div>
+    <div class="text-slate-400">PID</div>    <div class="k" id="gw_pid">—</div>
+   </div>
+   <div class="mt-3 flex flex-wrap gap-2">
+    <button class="btn btn-primary" onclick="gwAction('start')">Start</button>
+    <button class="btn" onclick="gwAction('stop')">Stop</button>
+    <button class="btn" onclick="gwAction('restart')">Restart</button>
+   </div>
+   <div class="mt-2 text-[11px] text-slate-500" id="gw_msg">&nbsp;</div>
+  </div>
+ </div>
+
+ <!-- Launcher buttons moved into header; launch status messages hide here -->
+ <div class="hidden"><span id="launch_msg"></span></div>
+
 </main>
 
 <footer class="max-w-7xl mx-auto mt-6 text-center text-[11px] text-slate-500">
@@ -493,6 +703,42 @@ async function refresh(){
  $('upd_sec').textContent = d.updates.security ?? 0;
  $('upd_at').textContent = fmtAgo(d.updates.checked_at);
 
+ const al = d.argent_lite || {};
+ $('al_scope').textContent = al.scope ? '('+al.scope+'-scope)' : '';
+ $('al_unit').textContent = al.unit || '—';
+ $('al_state').textContent = al.active || 'unknown';
+ $('al_pid').textContent = (al.pid && al.pid>0) ? al.pid : '—';
+ $('al_uptime').textContent = (al.uptime_s && al.uptime_s>0) ? (al.uptime_s+'s') : '—';
+ const dot = $('al_dot');
+ if (al.active === 'active')       dot.style.background = '#22c55e';
+ else if (al.active === 'failed')  dot.style.background = '#ef4444';
+ else                              dot.style.background = '#64748b';
+
+ const gw = d.argent_gateway || {};
+ $('gw_scope').textContent = gw.scope ? '('+gw.scope+'-scope)' : '';
+ $('gw_unit').textContent = gw.unit || '—';
+ $('gw_state').textContent = gw.active || 'unknown';
+ $('gw_pid').textContent = (gw.pid && gw.pid>0) ? gw.pid : '—';
+ $('gw_port').textContent = gw.port_listening ? 'listening' : 'closed';
+ const gwDot = $('gw_dot');
+ if (gw.port_listening)            gwDot.style.background = '#22c55e';
+ else if (gw.active === 'failed')  gwDot.style.background = '#ef4444';
+ else                              gwDot.style.background = '#64748b';
+
+ // Desktop button: disable visually when gateway isn't listening
+ const dBtn = $('btn_desktop');
+ if (dBtn) {
+  if (gw.port_listening) {
+   dBtn.style.opacity = '1';
+   dBtn.style.pointerEvents = 'auto';
+   dBtn.title = 'Open ArgentOS Desktop (React UI) at :8080';
+  } else {
+   dBtn.style.opacity = '0.45';
+   dBtn.style.pointerEvents = 'none';
+   dBtn.title = 'Gateway is not listening on :18789 — start it below first';
+  }
+ }
+
  const list = $('svc_list');
  if(d.services.length === 0){
   list.innerHTML = '<div class="text-slate-500 text-xs">No services configured. Edit SERVICES in dashboard.py.</div>';
@@ -527,6 +773,50 @@ function setAuto(){ post({auto:true}); }
 function setCool(){ post({cool: parseInt($('cool_sel').value)}); }
 async function refreshUpdates(){
  await fetch('/api/updates/refresh',{method:'POST'});
+ refresh();
+}
+async function alAction(action){
+ const msg = $('al_msg');
+ msg.textContent = '→ '+action+'…';
+ try {
+  const r = await fetch('/api/argent-lite/'+action, {method:'POST'});
+  const j = await r.json();
+  msg.textContent = j.ok ? ('✓ '+action+' ok') : ('✗ '+action+': '+(j.error||j.stderr||'failed'));
+ } catch(e){
+  msg.textContent = '✗ '+action+' threw: '+e;
+ }
+ setTimeout(refresh, 500);
+}
+async function launchDashboard(){
+ const msg = $('launch_msg');
+ msg.textContent = 'opening http://localhost:8080 …';
+ try {
+  const r = await fetch('/api/launch/desktop', {method:'POST'});
+  const j = await r.json();
+  if (j.ok) msg.textContent = '✓ opened in new tab';
+  else {
+   window.open('http://localhost:8080', '_blank');
+   msg.textContent = 'opened in new tab (xdg-open fallback: '+(j.error||'n/a')+')';
+  }
+ } catch(e){
+  window.open('http://localhost:8080', '_blank');
+  msg.textContent = 'opened in new tab';
+ }
+}
+async function gwAction(action){
+ const msg = $('gw_msg');
+ msg.textContent = '→ '+action+'…';
+ try {
+  const r = await fetch('/api/argent-gateway/'+action, {method:'POST'});
+  const j = await r.json();
+  msg.textContent = j.ok ? ('✓ '+action+' ok (gateway builds take ~40s on first start)') : ('✗ '+action+': '+(j.error||j.stderr||'failed'));
+ } catch(e){
+  msg.textContent = '✗ '+action+' threw: '+e;
+ }
+ setTimeout(refresh, 1000);
+}
+async function launchKiosk(){
+ alert('Kiosk mode ships in cycle-21 — voice + touchscreen not wired yet.');
  setTimeout(refresh, 500);
 }
 refresh();
@@ -598,6 +888,28 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/updates/refresh":
             threading.Thread(target=refresh_updates, daemon=True).start()
             self._json({"ok": True})
+        elif self.path in ("/api/argent-lite/start",
+                           "/api/argent-lite/stop",
+                           "/api/argent-lite/restart"):
+            action = self.path.rsplit("/", 1)[-1]
+            self._json(argent_lite_action(action))
+        elif self.path in ("/api/argent-gateway/start",
+                           "/api/argent-gateway/stop",
+                           "/api/argent-gateway/restart"):
+            action = self.path.rsplit("/", 1)[-1]
+            self._json(argent_gateway_action(action))
+        elif self.path == "/api/launch/desktop":
+            # Best-effort xdg-open from server side; client also opens a tab.
+            try:
+                subprocess.Popen(
+                    ["sudo", "-u", ARGENT_LITE_USER, "-E",
+                     "env", f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
+                     "xdg-open", "http://localhost:8080"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)[:200]})
         else:
             self.send_error(404)
 
