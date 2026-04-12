@@ -7,6 +7,11 @@ import { MessageBus } from "../agents/message-bus.js";
 import { createAgentContext } from "../agents/agent-context.js";
 import { withRouter } from "../agents/context-with-router.js";
 import { RouterAgent } from "../agents/router-agent.js";
+import { SatelliteAgent } from "../agents/satellite-agent.js";
+import {
+  createRuntimeSatelliteClient,
+  type RuntimeSatelliteClient,
+} from "../satellite/runtime-client.js";
 import { createIntentRouter } from "../intents/router.js";
 import { CliStdioChannel } from "../channels/cli-stdio.js";
 import { Scheduler } from "../scheduler/scheduler.js";
@@ -22,6 +27,12 @@ import type { AgentMessage } from "../agents/types.js";
 import type { Readable, Writable } from "node:stream";
 import type { SchedulableAgent } from "../scheduler/types.js";
 
+export interface SatelliteRuntimeConfig {
+  baseUrl: string;
+  secret: string;
+  fallback?: boolean;
+}
+
 export interface RuntimeOptions {
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
@@ -29,6 +40,9 @@ export interface RuntimeOptions {
   providers?: Provider[];
   credentials?: CredentialStore;
   now?: () => number;
+  mode?: "standalone" | "satellite";
+  satellite?: SatelliteRuntimeConfig;
+  satelliteClient?: RuntimeSatelliteClient;
 }
 
 export interface Runtime {
@@ -175,7 +189,27 @@ export async function bootRuntime(
     memory,
   });
   const ctx = withRouter(baseCtx, router);
-  const agent = new RouterAgent("router", ctx);
+  const mode = opts.mode ?? "standalone";
+  let agent: RouterAgent | SatelliteAgent;
+  if (mode === "satellite") {
+    if (!opts.satellite && !opts.satelliteClient) {
+      throw new Error("bootRuntime: satellite mode requires opts.satellite");
+    }
+    const client: RuntimeSatelliteClient =
+      opts.satelliteClient ??
+      createRuntimeSatelliteClient({
+        baseUrl: opts.satellite!.baseUrl,
+        secret: opts.satellite!.secret,
+        now,
+      });
+    const fallbackEnabled = opts.satellite?.fallback !== false;
+    agent = new SatelliteAgent("router", ctx, {
+      client,
+      fallbackRouter: fallbackEnabled ? router : undefined,
+    });
+  } else {
+    agent = new RouterAgent("router", ctx);
+  }
   const schedulable: SchedulableAgent = {
     id: agent.id,
     get state() {
