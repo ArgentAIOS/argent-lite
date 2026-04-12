@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Argent Lite Launcher</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --accent: #2f81f7;
+        --ok: #3fb950;
+        --err: #f85149;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+      main { max-width: 520px; margin: 4rem auto; padding: 1.5rem; }
+      h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+      .panel { background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+      .row { display: flex; justify-content: space-between; gap: 0.5rem;
+        font-size: 0.9rem; padding: 0.25rem 0; }
+      .row span:first-child { color: var(--muted); }
+      .dot { display: inline-block; width: 0.65rem; height: 0.65rem;
+        border-radius: 50%; background: var(--muted); margin-right: 0.4rem; }
+      .dot.ok { background: var(--ok); }
+      .dot.err { background: var(--err); }
+      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+      button { appearance: none; border: 1px solid var(--border); color: var(--fg);
+        background: #21262d; padding: 0.7rem 1rem; border-radius: 8px;
+        font-size: 0.95rem; cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #log { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.8rem;
+        color: var(--muted); white-space: pre-wrap; max-height: 10rem; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Argent Lite Launcher</h1>
+      <section class="panel">
+        <div class="row"><span>State</span><span id="state"><span class="dot"></span>unknown</span></div>
+        <div class="row"><span>Unit</span><span id="unit">—</span></div>
+        <div class="row"><span>PID</span><span id="pid">—</span></div>
+        <div class="row"><span>Uptime</span><span id="uptime">—</span></div>
+      </section>
+      <section class="panel buttons">
+        <button data-action="start">Start</button>
+        <button data-action="stop">Stop</button>
+        <button data-action="restart">Restart</button>
+        <button data-action="open-dashboard">Open Dashboard</button>
+      </section>
+      <section class="panel"><div id="log"></div></section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const log = (line) => {
+        const el = $("log");
+        el.textContent = `[${new Date().toLocaleTimeString()}] ${line}\n` + el.textContent;
+      };
+      async function refresh() {
+        try {
+          const r = await fetch("/api/status", { headers: { accept: "application/json" } });
+          const j = await r.json();
+          const stateEl = $("state");
+          if (j && j.ok) {
+            const running = !!j.running;
+            stateEl.innerHTML = `<span class="dot ${running ? "ok" : "err"}"></span>${running ? "running" : "stopped"}`;
+            $("unit").textContent = j.unit ?? "—";
+            $("pid").textContent = j.pid ?? "—";
+            $("uptime").textContent = j.uptimeSec != null ? `${j.uptimeSec}s` : "—";
+          } else {
+            stateEl.innerHTML = `<span class="dot err"></span>error`;
+            log(`status error: ${j && j.error ? j.error : "unknown"}`);
+          }
+        } catch (err) {
+          log(`status fetch failed: ${err}`);
+        }
+      }
+      async function act(action) {
+        const path = action === "open-dashboard" ? "/api/open-dashboard" : `/api/${action}`;
+        log(`→ ${action}`);
+        try {
+          const r = await fetch(path, { method: "POST" });
+          const j = await r.json();
+          log(`← ${action}: ${JSON.stringify(j)}`);
+        } catch (err) {
+          log(`${action} failed: ${err}`);
+        }
+        refresh();
+      }
+      document.querySelectorAll("button[data-action]").forEach((btn) => {
+        btn.addEventListener("click", () => act(btn.dataset.action));
+      });
+      refresh();
+      setInterval(refresh, 3000);
+    </script>
+  </body>
+</html>
