@@ -1,101 +1,65 @@
-# Task 020 — engineer-auth
+# Task 021 — engineer-auth
 
 Contract: ops/contracts/engineer-auth.contract.md
-Slice: init-wizard
-Branch: codex/init-wizard (worktree /home/jason/code/argent-lite-auth)
+Slice: voice-out-elevenlabs
+Branch: codex/voice-out-elevenlabs (worktree /home/jason/code/argent-lite-auth)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-auth.md
-- src/cli/init.ts
-- src/cli/init-prompts.ts
-- tests/cli/init.test.ts
-- tests/cli/init-prompts.test.ts
+- src/channels/voice-out.ts
+- tests/channels/voice-out.test.ts
+
+## Context
+
+The kiosk speaks responses through a speaker. Implement voice-out as a
+channel: subscribe to bus `kind: "completion"` messages, stream the text
+to ElevenLabs TTS, pipe audio bytes to `aplay` (or injected spawn).
 
 ## Goal
 
-Interactive first-run wizard: `argent-lite init` (operator calls
-`runInit()` from a new entrypoint). Writes config + credentials so
-the service is ready to start.
-
-### 1. `src/cli/init-prompts.ts` — pure prompt helpers
-
-```ts
-export interface Prompter {
-  ask(question: string, opts?: { default?: string; mask?: boolean }): Promise<string>;
-  choose<T extends string>(question: string, options: readonly T[], defaultIdx?: number): Promise<T>;
-  multiChoose<T extends string>(question: string, options: readonly T[]): Promise<T[]>;
-  confirm(question: string, defaultYes?: boolean): Promise<boolean>;
-  print(line: string): void;
-}
-export function createReadlinePrompter(stdin?: NodeJS.ReadableStream, stdout?: NodeJS.WritableStream): Prompter;
-```
-
-- Uses `node:readline`.
-- `mask: true` → don't echo input (write `*` per char) for API keys.
-- `multiChoose` shows a numbered list; user enters comma-separated indices.
-- All methods return promises; no callbacks.
-
-### 2. `src/cli/init.ts` — wizard orchestration
-
-```ts
-export interface InitOptions {
-  prompter?: Prompter;
-  configPath?: string;                   // default ~/.argent-lite/config.json
-  credentialsPath?: string;               // default ~/.argent-lite/credentials.json.enc
-  masterKeyEnv?: NodeJS.ProcessEnv;       // default process.env
-  writeFile?: (path: string, content: string) => Promise<void>;
-  probe?: (provider: string, key: string) => Promise<boolean>;  // optional live-verify
-  clientPing?: (url: string, secret: string) => Promise<boolean>;  // satellite
-}
-export interface InitResult {
-  configWritten: string;
-  credentialsWritten: string;
-  providersConfigured: string[];
-  mode: "standalone" | "satellite";
-}
-export async function runInit(opts?: InitOptions): Promise<InitResult>;
-```
-
-Flow (each step is a call to `prompter`):
-
-1. Check existing config at `configPath`. If present, `confirm("overwrite?")`. If no, exit with result marking no-op.
-2. `choose("mode", ["standalone", "satellite"])`.
-3. `multiChoose("providers", ["ollama", "groq", "openrouter", "zai-coder", "zai-api", "anthropic", "openai"])`. At least one required.
-4. For each cloud provider (not ollama):
-   - `ask("API key for <provider>", {mask: true})`
-   - If `probe` option present, run it; on failure `confirm("save anyway?")`.
-   - Collect `{providerId, secret}` pairs.
-5. If `masterKeyEnv.ARGENT_MASTER_KEY` is absent:
-   - `confirm("Generate a new master key?")`
-   - If yes, generate via `crypto.randomBytes(32).toString("hex")` and print once with clear warning to save it in `/etc/default/argent-lite` or env.
-6. Construct `createCredentialStore({backend: "file", path: credentialsPath})` and call `set()` for each cloud key.
-7. If satellite: `ask("Mac brain base URL")`, `ask("HMAC secret", {mask: true})`, optionally probe with `clientPing`.
-8. Build a `ArgentConfig` (from `src/config/schema.ts`) and JSON-stringify it to `configPath`.
-9. Print success summary.
-
-### 3. Tests
-
-- `init-prompts.test.ts` — inject `PassThrough` streams for stdin+stdout:
-  test ask/choose/multiChoose/confirm/mask all produce correct returns.
-- `init.test.ts` — inject a fake `Prompter` that scripts answers via
-  a queue, inject fake `writeFile` + `probe`, run `runInit`, assert:
-  - config.json content is correct ArgentConfig
-  - credentialsPath was written (mock CredentialStore if needed)
-  - Providers list matches selection
-  - Mode matches selection
-  - Satellite path additionally captures base URL + secret
+1. `src/channels/voice-out.ts`:
+   ```ts
+   export interface VoiceOutOptions {
+     bus: { subscribe(id: string, h: (msg: unknown) => void): () => void };
+     getKey: () => Promise<string> | string;       // ElevenLabs API key
+     voiceId?: string;                              // default "21m00Tcm4TlvDq8ikWAM" (Rachel)
+     model?: string;                                // default "eleven_flash_v2_5"
+     subscribeAs?: string;                          // bus address, default "cli"
+     fetchImpl?: typeof fetch;
+     spawn?: (cmd: string, args: string[]) => NodeJS.WritableStream;  // injected — default aplay
+     now?: () => number;
+   }
+   export interface VoiceOutChannel {
+     start(): Promise<void>;
+     stop(): Promise<void>;
+   }
+   export function createVoiceOutChannel(opts: VoiceOutOptions): VoiceOutChannel;
+   ```
+   - `start()` subscribes to bus.
+   - On `{kind: "completion", payload: {text}}`, POSTs to
+     `https://api.elevenlabs.io/v1/text-to-speech/{voiceId}/stream?output_format=pcm_22050` with header `xi-api-key`, body `{text, model_id}`.
+   - Streams response body chunks into the `aplay` child process:
+     `spawn("aplay", ["-q", "-f", "S16_LE", "-r", "22050", "-c", "1"])`.
+   - On `{kind: "error"}`, speak a short "sorry, something went wrong" via the same pipeline.
+   - `stop()` unsubscribes, closes aplay stdin.
+2. `tests/channels/voice-out.test.ts`:
+   - Inject fake bus + `fetchImpl` (returns ReadableStream of fake PCM bytes) + `spawn` (returns PassThrough).
+   - Start channel, emit a completion message, assert:
+     - fetch called with correct URL + xi-api-key header + body
+     - spawn called with aplay args
+     - PCM bytes flow into the PassThrough
+   - On `kind: "error"`: asserts the apology TTS call was made.
+   - `stop()` unsubscribes + closes aplay stream.
 
 ## Constraints
 
-- Do NOT touch `bootRuntime`, `runtime-client.ts`, `credential-store.ts`,
-  or `schema.ts` — consume them as imports.
-- Do NOT prompt from test files via real TTY. Always inject Prompter.
-- No new deps. Node built-ins only (`node:readline`, `node:crypto`).
-- Strict TS, no `any`.
+- Node built-ins only. `fetch` is global. No `child_process` hard-coded — must be injectable for tests.
+- Do NOT touch `src/channels/cli-stdio.ts`, `http.ts`, `file-watch.ts`.
+- Do NOT touch `src/auth/**` — take `getKey` as callback.
+- Strict TS, no `any`. No mutation of global `process.env`.
 
 ## Acceptance criterion
 
-- 4 files, `pnpm check`, `pnpm test tests/cli/init*` all pass.
-- Wizard is fully unit-tested via injection.
+- 2 files, `pnpm check` + `pnpm test tests/channels/voice-out.test.ts` pass.
 - SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
 
 Deadline: before next cron tick.

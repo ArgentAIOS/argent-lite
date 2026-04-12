@@ -1,71 +1,34 @@
-# Task 020 — architect
+# Task 021 — architect
 
 Contract: ops/contracts/architect.contract.md
-Slice: ui-and-onboarding-design
-Branch: codex/ui-and-onboarding-design (worktree /home/jason/code/argent-lite-cli)
-Surface: ops/team/outbox/architect.md, ops/projects/ui-and-onboarding-design.md
+Slice: kiosk-v0-design
+Branch: codex/kiosk-v0-design (worktree /home/jason/code/argent-lite-cli)
+Surface: ops/team/outbox/architect.md, ops/projects/kiosk-v0-design.md
+
+## Context
+
+Operator confirmed the Echo-Dot form factor: 7" touchscreen, mic, speaker,
+camera, voice-first ambient appliance. Walk up and talk. Touchscreen is
+for onboarding + glance-able status. Mac dashboard stays separate.
 
 ## Goal
 
-One document, two sections (≤180 lines total):
+Write `ops/projects/kiosk-v0-design.md` (≤180 lines) — the first concrete
+spec for the kiosk.
 
-### Part A — UI launcher design (~80 lines)
+1. **State machine** (ASCII): idle → listening → thinking → speaking → idle, with timeouts and push-to-talk entry.
+2. **Screen layout** for 7" @ 1024×600 (typical Pi touchscreen):
+   - Top 60%: AEVP orb (iframe of argentos dashboard at :8080 with `?kiosk=1&piProfile=1`)
+   - Middle 20%: single-line status text
+   - Bottom 20%: giant push-to-talk button + small gear icon (settings)
+3. **Push-to-talk v1**, wake-word deferred to cycle-22. Button sends `voice.in.start`, release sends `voice.in.end`.
+4. **Voice pipeline contract**:
+   - `voice-in` channel: `arecord` → WAV buffer → Groq whisper-large-v3 → bus `kind: "prompt"` `payload: {prompt, trace_id}`
+   - `voice-out` channel: bus `kind: "completion"` → ElevenLabs TTS → `aplay` / `paplay` stream chunks
+5. **Onboarding-via-touchscreen** wireframe: 5 steps (mode → providers → api keys via on-screen keyboard → master key generation → satellite Mac URL optional).
+6. **Config surface**: new `kiosk:` block in `ArgentConfig` schema.
+7. **Candidate file areas**: `src/kiosk/`, `src/channels/voice-in.ts`, `src/channels/voice-out.ts`.
+8. **Sub-slices** for cycle-22 (wake-word, camera presence, AEVP embed, offline STT fallback).
+9. **Acceptance criteria** for the kiosk-v0 gate.
 
-1. Purpose: a web-based launcher served by argent-lite itself on
-   `127.0.0.1:7787`. Operator opens their browser (or clicks a
-   `.desktop` entry) and sees 4 buttons: Start, Stop, Restart,
-   Open ArgentOS Dashboard.
-2. Subsystem name: `src/ui/`.
-3. Backend endpoints (simple HTTP, no auth since 127.0.0.1 only):
-   - `GET /` → static `index.html`
-   - `GET /api/status` → JSON `{running, pid, uptimeSec, lastError}`
-   - `POST /api/start` → spawns `systemctl --user start argent-lite`
-   - `POST /api/stop` → `systemctl --user stop argent-lite`
-   - `POST /api/restart` → `systemctl --user restart argent-lite`
-   - `POST /api/open-dashboard` → spawns `xdg-open $ARGENT_DASHBOARD_URL`
-4. File tree: `src/ui/server.ts`, `src/ui/handlers.ts`, `src/ui/index.html`, `deploy/argent-lite-launcher.desktop`.
-5. Security notes: bind only to `127.0.0.1`, never `0.0.0.0`.
-   No auth (it's loopback). Reject requests if `host` header is not
-   `127.0.0.1:*` or `localhost:*`. No systemctl calls outside a
-   whitelisted set of unit names.
-6. Integration: the UI server is optional — `bootRuntime` does NOT
-   auto-start it; it's its own `argent-lite ui` entrypoint so users can
-   opt in.
-
-### Part B — Onboarding wizard + satellite mode wiring (~100 lines)
-
-1. **`argent-lite init`** — interactive wizard, new entrypoint:
-   - Detect `~/.argent-lite/config.json` — if present, ask to overwrite.
-   - Step 1: mode → `standalone | satellite`.
-   - Step 2: choose providers (checkbox prompt): ollama (local),
-     groq, openrouter, zai-coder, zai-api, anthropic, openai.
-   - Step 3: for each cloud provider, prompt for API key, verify via
-     lightweight probe (e.g. models list), store via `CredentialStore`
-     (env backend writes `~/.argent-lite/credentials.json.enc`; ask
-     for `ARGENT_MASTER_KEY` if not set, generate one if requested).
-   - Step 4: if satellite, prompt for Mac brain base URL + HMAC shared
-     secret, `ping()` it via `createRuntimeSatelliteClient`.
-   - Step 5: write `~/.argent-lite/config.json` via `writeConfig()`.
-   - Step 6: print next-steps (start service, open UI).
-2. **Satellite mode wiring** — `bootRuntime()` behavior when `mode=satellite`:
-   - Still constructs local `MessageBus`, `Scheduler`, `MemoryStore`,
-     channels — all local infrastructure stays.
-   - Registers a `SatelliteAgent` (new) in place of / alongside
-     `RouterAgent`. SatelliteAgent delegates prompts to
-     `createRuntimeSatelliteClient` against the Mac brain.
-   - On satellite failure, falls back to local router (if providers configured).
-   - Optionally starts a `createRuntimeSatelliteServer` listening on
-     a port so the Mac can push commands back (Phase 5, flag for later).
-3. File plan:
-   - `src/cli/init.ts` — interactive wizard.
-   - `src/cli/init-prompts.ts` — prompt helpers (pure, testable).
-   - `src/agents/satellite-agent.ts` — SatelliteAgent class.
-   - `src/integration/runtime.ts` — mode-aware agent selection (edit).
-4. Interactive prompts: Node built-in `readline` only, no new deps.
-5. Test strategy: inject a fake `Prompter` interface so wizard logic
-   is fully unit-testable without TTY.
-6. Acceptance criteria for the onboarding slice.
-
-SELF-COMMIT, PUSH, `gh pr create --base codex/ops-team-bootstrap --head codex/ui-and-onboarding-design`.
-
-Deadline: before next cron tick.
+SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap. Deadline: before next cron tick.
