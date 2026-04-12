@@ -1,121 +1,83 @@
-# Task 020 — engineer-floor
+# Task 021 — engineer-floor
 
 Contract: ops/contracts/engineer-floor.contract.md
-Slice: ui-launcher-impl
-Branch: codex/ui-launcher-impl (worktree /home/jason/code/argent-lite-floor)
+Slice: kiosk-ui-v0
+Branch: codex/kiosk-ui-v0 (worktree /home/jason/code/argent-lite-floor)
 Surface (WRITE authorized — nothing else):
 - ops/team/outbox/engineer-floor.md
-- src/ui/server.ts
-- src/ui/handlers.ts
-- src/ui/index.html
-- src/ui/index.ts
-- tests/ui/handlers.test.ts
-- tests/ui/server.test.ts
-- deploy/argent-lite-launcher.desktop
-- src/cli/ui.ts
+- src/kiosk/server.ts
+- src/kiosk/handlers.ts
+- src/kiosk/index.html
+- src/kiosk/index.ts
+- src/cli/kiosk.ts
+- tests/kiosk/handlers.test.ts
+- tests/kiosk/server.test.ts
+- deploy/argent-lite-kiosk.desktop
 
 ## Goal
 
-HTTP launcher served by argent-lite on `127.0.0.1:7787` with 4
-actions: Start / Stop / Restart / Open Dashboard.
+A full-screen HTTP kiosk UI on `127.0.0.1:7788` with:
+- State machine display (idle/listening/thinking/speaking)
+- Giant "Tap to Talk" button (push-to-talk)
+- Status text line
+- Settings gear (opens onboarding wizard — future slice)
+- SSE stream `/events` from `argent-lite` daemon that emits state transitions
 
-### 1. `src/ui/handlers.ts` — pure handler logic
+No AEVP embed yet (cycle-22). Use a CSS radial-gradient disc that pulses/rotates based on state. Plain HTML+JS, no framework.
 
-```ts
-export interface SystemctlRunner {
-  run(cmd: "start" | "stop" | "restart", unit: string): Promise<{ code: number; stdout: string; stderr: string }>;
-  status(unit: string): Promise<{ running: boolean; pid?: number; uptimeSec?: number; lastError?: string }>;
-}
+### Files
 
-export interface BrowserOpener {
-  open(url: string): Promise<void>;
-}
-
-export interface UiHandlersOptions {
-  systemctl: SystemctlRunner;
-  browser: BrowserOpener;
-  unit?: string;            // default "argent-lite.service"
-  dashboardUrl?: string;    // default process.env.ARGENT_DASHBOARD_URL || "http://localhost:5173"
-}
-
-export interface UiHandlers {
-  status(): Promise<Record<string, unknown>>;
-  start(): Promise<Record<string, unknown>>;
-  stop(): Promise<Record<string, unknown>>;
-  restart(): Promise<Record<string, unknown>>;
-  openDashboard(): Promise<Record<string, unknown>>;
-}
-export function createUiHandlers(opts: UiHandlersOptions): UiHandlers;
-```
-
-Unit whitelist: only accept `"argent-lite"` or `"argent-lite.service"`
-(case-sensitive). Reject anything else with `{ok: false, error: "unit not allowed"}`.
-Never shell-interpolate — pass args as array to `execFile`.
-
-### 2. `src/ui/server.ts` — HTTP glue
-
-- `startUiServer(opts: { handlers: UiHandlers; port?: number; host?: string }): Promise<{port: number; stop(): Promise<void>}>`
-- Uses `node:http.createServer`. Default host `"127.0.0.1"`, port `7787`.
-- Routes:
-  - `GET /` → `index.html` (read at startup, cached)
-  - `GET /api/status` → JSON
-  - `POST /api/start` → JSON
-  - `POST /api/stop` → JSON
-  - `POST /api/restart` → JSON
-  - `POST /api/open-dashboard` → JSON
-  - anything else → 404
-- **Security:** reject any request whose `host` header is not
-  `127.0.0.1:{port}` or `localhost:{port}`. 403 on mismatch.
-- CORS: none (loopback only).
-
-### 3. `src/ui/index.html` — single-file UI
-
-Plain HTML + inline CSS + inline vanilla JS. No framework, no build
-step. 4 buttons. Calls `/api/*` via fetch. Updates status every 3s.
-Tasteful dark theme, ~150 lines total. No external fonts, no external
-assets — must work fully offline on the Pi.
-
-### 4. `src/ui/index.ts` — re-exports.
-
-### 5. `src/cli/ui.ts` — entrypoint
-
-```ts
-export async function runUi(argv: string[] = process.argv.slice(2)): Promise<number>;
-```
-
-- Constructs real `SystemctlRunner` (child_process.execFile) and
-  `BrowserOpener` (spawn `xdg-open`).
-- Calls `createUiHandlers` + `startUiServer`.
-- Prints `listening on http://127.0.0.1:7787`.
-- Waits for SIGINT, then `server.stop()`.
-
-### 6. `deploy/argent-lite-launcher.desktop`
-
-Freedesktop entry:
-```
-[Desktop Entry]
-Type=Application
-Name=Argent Lite Launcher
-Comment=Control Argent Lite service
-Exec=xdg-open http://127.0.0.1:7787
-Icon=applications-system
-Terminal=false
-Categories=System;Utility;
-```
-
-### 7. Tests
-
-- `tests/ui/handlers.test.ts`: inject fake SystemctlRunner + BrowserOpener,
-  verify whitelist rejection, status shape, action dispatch, error
-  propagation.
-- `tests/ui/server.test.ts`: start on port 0, fetch `/`, fetch `/api/status`,
-  POST `/api/start` with fake handlers, assert host-header rejection
-  (403 when `host: evil.com`).
+1. `src/kiosk/handlers.ts`:
+   ```ts
+   export interface KioskHandlers {
+     status(): Promise<{state: "idle"|"listening"|"thinking"|"speaking"; statusText: string}>;
+     talkStart(): Promise<{ok: boolean}>;      // POST — begins mic capture
+     talkEnd(): Promise<{ok: boolean; transcript?: string}>;  // POST — stops, returns transcript
+     interrupt(): Promise<{ok: boolean}>;      // POST — cancels current speech
+   }
+   export interface KioskHandlerOptions {
+     // Dependency injection for tests. Real impl wires arecord + Groq STT.
+     startCapture?: () => Promise<void>;
+     stopCapture?: () => Promise<string | undefined>;
+     cancelSpeech?: () => Promise<void>;
+     getState?: () => "idle"|"listening"|"thinking"|"speaking";
+   }
+   export function createKioskHandlers(opts?: KioskHandlerOptions): KioskHandlers;
+   ```
+2. `src/kiosk/server.ts` — HTTP on `127.0.0.1:7788`:
+   - `GET /` → `index.html`
+   - `GET /api/status` → current state JSON
+   - `GET /events` → Server-Sent Events stream (`text/event-stream`) with state ticks every 500ms
+   - `POST /api/talk/start` → start mic capture
+   - `POST /api/talk/end` → stop + return transcript
+   - `POST /api/interrupt` → cancel current TTS
+   - Host-header guard (loopback only) same as UI launcher
+3. `src/kiosk/index.html` — full-screen, dark theme:
+   - Centered 400px radial-gradient disc (CSS `background: radial-gradient(...)`) that pulses at 1s breath when idle, rotates when listening, accelerates when thinking, pulses fast when speaking.
+   - Status text "Tap to talk" / "Listening..." / "Thinking..." / "[response]"
+   - 280×100 tap-to-talk button at bottom (pressdown = talk/start, release = talk/end)
+   - Settings gear (top-right, 40px) with `onclick` → `alert('settings panel ships cycle-22')` placeholder
+   - SSE subscription to `/events` for live state updates
+4. `src/cli/kiosk.ts` — `runKiosk(argv)`:
+   - Creates real handlers (stubs `startCapture`/`stopCapture` for now — prints `[kiosk] mic capture not wired yet` and returns immediately)
+   - Starts `startKioskServer({port: 7788, handlers})`
+   - Logs `listening on http://127.0.0.1:7788`
+   - SIGINT clean shutdown
+5. `tests/kiosk/handlers.test.ts` — inject mocks, verify state transitions + error paths
+6. `tests/kiosk/server.test.ts` — PassThrough streams, verify `/api/status`, SSE `/events` connects, host-header rejection (403 on evil.com)
+7. `deploy/argent-lite-kiosk.desktop` — freedesktop entry with `Exec=chromium --kiosk --noerrdialogs --disable-infobars http://127.0.0.1:7788`
 
 ## Constraints
 
-- Node built-ins only. No express, no frameworks.
-- Do NOT touch `bootRuntime` or any other subsystem.
+- Node built-ins only. No frameworks. No new deps.
+- Real mic/speaker wiring is **engineer-auth** and **engineer-router** this cycle — you just need the stub to return "not wired" so tests pass.
 - Strict TS, no `any`.
 
-Deadline: before next cron tick. SELF-COMMIT, PUSH, PR.
+## Acceptance criterion
+
+- 7 files exist.
+- `pnpm check` + `pnpm test tests/kiosk/` pass.
+- `node dist/src/cli/kiosk.js` binds 7788 and serves the HTML.
+- SELF-COMMIT, PUSH, PR to codex/ops-team-bootstrap.
+
+Deadline: before next cron tick.

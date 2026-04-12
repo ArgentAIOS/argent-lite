@@ -1,13 +1,13 @@
-# Task 020 — reviewer
+# Task 021 — reviewer
 
 Single pass, outbox only. NO commit. NO PR.
 
 Branches:
-- codex/ui-and-onboarding-design
-- codex/ui-launcher-impl
-- codex/init-wizard
-- codex/satellite-mode-wiring
+- codex/kiosk-v0-design
+- codex/kiosk-ui-v0
+- codex/voice-out-elevenlabs
+- codex/voice-in-groq
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle20-review
+Slice: cycle21-review
 Deadline: ≤5 minutes.
