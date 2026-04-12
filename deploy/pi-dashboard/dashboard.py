@@ -1,0 +1,609 @@
+#!/usr/bin/env python3
+"""Pi system dashboard: temps, fan, CPU, memory, disk, Pi info, services."""
+import json
+import os
+import platform
+import subprocess
+import threading
+import time
+import socket
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+PORT = 9090
+HWMON_FAN = "/sys/class/hwmon/hwmon3"
+COOLING = "/sys/class/thermal/cooling_device0"
+HWMON_CPU_TEMP = "/sys/class/hwmon/hwmon0/temp1_input"
+HWMON_NVME_TEMP = "/sys/class/hwmon/hwmon1/temp1_input"
+
+# Services to health-check. Add entries as ArgentOS grows.
+# Use "url" for HTTP probes or "systemd" for unit checks.
+SERVICES = [
+    {"name": "argentos-core", "type": "API", "url": "http://127.0.0.1:8000/health"},
+    # argent-lite listeners (loopback-only, phase-gated — down until deployed):
+    {"name": "argent-desktop-ui", "type": "Web", "tcp": ("127.0.0.1", 7787)},
+    {"name": "argent-kiosk/satellite", "type": "Gateway", "tcp": ("127.0.0.1", 7788)},
+    {"name": "ollama", "type": "API", "url": "http://127.0.0.1:11434/"},
+    # {"name": "argent-lite chat", "type": "Service", "systemd": "argent-lite-chat.service"},
+]
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def read(path, default=None):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def write(path, value):
+    with open(path, "w") as f:
+        f.write(str(value))
+
+
+_prev_cpu = None
+
+
+def cpu_usage():
+    global _prev_cpu
+    with open("/proc/stat") as f:
+        parts = f.readline().split()[1:]
+    vals = [int(x) for x in parts]
+    idle = vals[3] + vals[4]
+    total = sum(vals)
+    pct = 0.0
+    if _prev_cpu is not None:
+        dt = total - _prev_cpu[0]
+        di = idle - _prev_cpu[1]
+        if dt > 0:
+            pct = (1 - di / dt) * 100
+    _prev_cpu = (total, idle)
+    return round(pct, 1)
+
+
+def meminfo():
+    info = {}
+    with open("/proc/meminfo") as f:
+        for line in f:
+            k, v = line.split(":", 1)
+            info[k] = int(v.strip().split()[0])
+    total = info["MemTotal"]
+    avail = info.get("MemAvailable", info["MemFree"])
+    used = total - avail
+    return {
+        "total_mb": round(total / 1024),
+        "used_mb": round(used / 1024),
+        "pct": round(used / total * 100, 1),
+    }
+
+
+def diskinfo(path="/"):
+    s = os.statvfs(path)
+    total = s.f_blocks * s.f_frsize
+    free = s.f_bavail * s.f_frsize
+    used = total - free
+    return {
+        "total_gb": round(total / 1e9, 1),
+        "used_gb": round(used / 1e9, 1),
+        "pct": round(used / total * 100, 1),
+    }
+
+
+def loadavg():
+    with open("/proc/loadavg") as f:
+        a, b, c = f.read().split()[:3]
+    return [float(a), float(b), float(c)]
+
+
+def uptime():
+    with open("/proc/uptime") as f:
+        s = float(f.read().split()[0])
+    d, r = divmod(int(s), 86400)
+    h, r = divmod(r, 3600)
+    m, _ = divmod(r, 60)
+    return f"{d}d {h}h {m}m"
+
+
+def temp_c(path):
+    v = read(path)
+    return round(int(v) / 1000, 1) if v else None
+
+
+def os_release():
+    out = {}
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.rstrip().split("=", 1)
+                    out[k] = v.strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def pi_model():
+    try:
+        with open("/proc/device-tree/model") as f:
+            return f.read().strip("\x00 \n")
+    except OSError:
+        return platform.machine()
+
+
+def firmware_version():
+    try:
+        r = subprocess.run(["vcgencmd", "version"], capture_output=True, text=True, timeout=1)
+        for line in r.stdout.splitlines():
+            if "version" in line.lower() or "copyright" not in line.lower():
+                return line.strip()
+    except Exception:
+        pass
+    return None
+
+
+# --- Slow / cached data ------------------------------------------------------
+
+STATIC_INFO = {}
+UPDATES = {"count": None, "security": None, "checked_at": 0, "checking": False}
+
+
+def load_static():
+    rel = os_release()
+    STATIC_INFO.update({
+        "model": pi_model(),
+        "os": rel.get("PRETTY_NAME", "unknown"),
+        "os_version": rel.get("VERSION_ID", ""),
+        "kernel": platform.release(),
+        "arch": platform.machine(),
+        "python": platform.python_version(),
+        "hostname": platform.node(),
+        "firmware": firmware_version(),
+    })
+
+
+def refresh_updates():
+    if UPDATES["checking"]:
+        return
+    UPDATES["checking"] = True
+    try:
+        r = subprocess.run(
+            ["apt", "list", "--upgradable"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+        lines = [l for l in r.stdout.splitlines() if "/" in l and "Listing" not in l]
+        UPDATES["count"] = len(lines)
+        UPDATES["security"] = sum(1 for l in lines if "-security" in l)
+        UPDATES["checked_at"] = int(time.time())
+    except Exception:
+        UPDATES["count"] = None
+    finally:
+        UPDATES["checking"] = False
+
+
+def updates_loop():
+    while True:
+        refresh_updates()
+        time.sleep(900)  # every 15 min
+
+
+def probe_services():
+    results = []
+    for svc in SERVICES:
+        status = "down"
+        detail = ""
+        t0 = time.time()
+        try:
+            if "url" in svc:
+                req = urllib.request.Request(svc["url"])
+                with urllib.request.urlopen(req, timeout=0.8) as r:
+                    status = "up" if 200 <= r.status < 400 else "degraded"
+                    detail = f"HTTP {r.status}"
+            elif "tcp" in svc:
+                host, port = svc["tcp"]
+                with socket.create_connection((host, port), timeout=0.5):
+                    status = "up"
+                    detail = f"tcp {host}:{port}"
+            elif "systemd" in svc:
+                r = subprocess.run(
+                    ["systemctl", "is-active", svc["systemd"]],
+                    capture_output=True, text=True, timeout=1.5,
+                )
+                out = r.stdout.strip()
+                status = "up" if out == "active" else "down"
+                detail = out
+        except Exception as e:
+            detail = type(e).__name__
+        results.append({
+            "name": svc["name"],
+            "type": svc["type"],
+            "status": status,
+            "detail": detail,
+            "ms": round((time.time() - t0) * 1000),
+            "target": svc.get("url") or (f"{svc['tcp'][0]}:{svc['tcp'][1]}" if "tcp" in svc else svc.get("systemd", "")),
+        })
+    return results
+
+
+def gather():
+    fan_rpm = read(f"{HWMON_FAN}/fan1_input")
+    pwm = read(f"{HWMON_FAN}/pwm1")
+    pwm_en = read(f"{HWMON_FAN}/pwm1_enable")
+    return {
+        "cpu_temp": temp_c(HWMON_CPU_TEMP),
+        "nvme_temp": temp_c(HWMON_NVME_TEMP),
+        "fan_rpm": int(fan_rpm) if fan_rpm else 0,
+        "pwm": int(pwm) if pwm else 0,
+        "pwm_pct": round(int(pwm) / 255 * 100) if pwm else 0,
+        "pwm_enable": int(pwm_en) if pwm_en else 0,
+        "cool_cur": int(read(f"{COOLING}/cur_state") or 0),
+        "cool_max": int(read(f"{COOLING}/max_state") or 0),
+        "cpu_pct": cpu_usage(),
+        "mem": meminfo(),
+        "disk": diskinfo("/"),
+        "load": loadavg(),
+        "uptime": uptime(),
+        "info": STATIC_INFO,
+        "updates": dict(UPDATES),
+        "services": probe_services(),
+        "ts": int(time.time()),
+    }
+
+
+# --- HTML --------------------------------------------------------------------
+
+INDEX = r"""<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Dashboard</title>
+<script src="/static/tailwind.js"></script>
+<script>
+ tailwind.config = { theme: { extend: {
+  fontFamily: { sans: ['ui-sans-serif','system-ui','sans-serif'], mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] },
+  colors: { border:'hsl(220 20% 20% / .6)', accent:'hsl(174 72% 56%)' },
+ }}}
+</script>
+<style>
+ html,body{background:#05070d;color:#e6edf7;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+ body{
+  background:
+   radial-gradient(900px 600px at 12% -10%, rgba(56,189,248,.18), transparent 60%),
+   radial-gradient(800px 600px at 95% 10%, rgba(168,85,247,.18), transparent 60%),
+   radial-gradient(700px 500px at 50% 110%, rgba(16,185,129,.14), transparent 60%),
+   #05070d;
+  min-height:100vh;
+ }
+ .glass{
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 20px 60px -20px rgba(0,0,0,.6);
+  border-radius: 18px;
+ }
+ .glass:hover{border-color:rgba(255,255,255,.14);}
+ .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:500;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);}
+ .dot{width:7px;height:7px;border-radius:999px;display:inline-block;box-shadow:0 0 10px currentColor;}
+ .lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8a96ad;font-weight:500;}
+ .val{font-size:30px;font-weight:600;line-height:1.1;letter-spacing:-.02em;}
+ .sub{font-size:12px;color:#8a96ad;margin-top:4px;}
+ .bar{height:6px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;position:relative;}
+ .bar>i{display:block;height:100%;border-radius:999px;
+  background:linear-gradient(90deg,#22d3ee,#a855f7);transition:width .5s ease;}
+ .bar.warm>i{background:linear-gradient(90deg,#fbbf24,#f97316);}
+ .bar.hot>i{background:linear-gradient(90deg,#f97316,#ef4444);box-shadow:0 0 20px rgba(239,68,68,.5);}
+ .btn{padding:7px 12px;border-radius:10px;font-size:12px;font-weight:500;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#e6edf7;
+  transition:all .15s;cursor:pointer;}
+ .btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2);}
+ .btn-primary{background:linear-gradient(135deg,#22d3ee,#a855f7);border-color:transparent;}
+ .btn-primary:hover{filter:brightness(1.1);}
+ select,input[type=range]{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  color:#e6edf7;border-radius:10px;padding:6px 10px;font-size:12px;}
+ input[type=range]{padding:0;height:6px;-webkit-appearance:none;}
+ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:999px;
+  background:linear-gradient(135deg,#22d3ee,#a855f7);cursor:pointer;border:2px solid #05070d;}
+ .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#c2cde0;}
+ .status-up{color:#34d399;}
+ .status-down{color:#f87171;}
+ .status-degraded{color:#fbbf24;}
+ @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+ .live{animation:pulse 2s ease-in-out infinite;}
+</style>
+</head>
+<body class="p-5 md:p-8">
+<header class="max-w-7xl mx-auto mb-6 flex items-center justify-between flex-wrap gap-3">
+ <div>
+  <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">
+   <span class="bg-gradient-to-r from-cyan-300 via-sky-300 to-violet-400 bg-clip-text text-transparent">Argent</span>
+   <span class="text-white/90">Pi Dashboard</span>
+  </h1>
+  <div class="sub mt-1"><span id="hdr_host">—</span> · <span id="hdr_model">—</span></div>
+ </div>
+ <div class="flex items-center gap-2">
+  <span class="chip"><span class="dot live" style="background:#34d399;color:#34d399;"></span>live</span>
+  <span class="chip"><span class="k">updated</span> <span id="ts" class="k">—</span></span>
+ </div>
+</header>
+
+<main class="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+ <div class="glass p-5">
+  <div class="lbl">CPU Temp</div>
+  <div class="val mt-2" id="cpu_temp">—</div>
+  <div class="bar mt-3" id="cpu_temp_bar"><i style="width:0"></i></div>
+ </div>
+
+ <div class="glass p-5">
+  <div class="lbl">NVMe Temp</div>
+  <div class="val mt-2" id="nvme_temp">—</div>
+  <div class="bar mt-3" id="nvme_temp_bar"><i style="width:0"></i></div>
+ </div>
+
+ <div class="glass p-5">
+  <div class="lbl">CPU Usage</div>
+  <div class="val mt-2" id="cpu_pct">—</div>
+  <div class="sub" id="load">load —</div>
+  <div class="bar mt-3" id="cpu_bar"><i style="width:0"></i></div>
+ </div>
+
+ <div class="glass p-5">
+  <div class="lbl">Uptime</div>
+  <div class="val mt-2" id="uptime">—</div>
+  <div class="sub mt-1">kernel <span class="k" id="kernel">—</span></div>
+ </div>
+
+ <div class="glass p-5">
+  <div class="lbl">Memory</div>
+  <div class="val mt-2" id="mem">—</div>
+  <div class="sub" id="mem_sub">—</div>
+  <div class="bar mt-3" id="mem_bar"><i style="width:0"></i></div>
+ </div>
+
+ <div class="glass p-5">
+  <div class="lbl">Disk /</div>
+  <div class="val mt-2" id="disk">—</div>
+  <div class="sub" id="disk_sub">—</div>
+  <div class="bar mt-3" id="disk_bar"><i style="width:0"></i></div>
+ </div>
+
+ <div class="glass p-5 sm:col-span-2">
+  <div class="flex items-center justify-between">
+   <div class="lbl">Fan Control</div>
+   <span class="chip"><span class="k" id="pwm_mode_chip">—</span></span>
+  </div>
+  <div class="val mt-2"><span id="fan_rpm">—</span> <span class="text-sm text-slate-400 font-normal">rpm</span></div>
+  <div class="sub">pwm <span class="k" id="pwm">—</span>/255 · <span id="pwm_pct">—</span>%</div>
+  <div class="bar mt-3" id="fan_bar"><i style="width:0"></i></div>
+  <div class="mt-4 flex items-center gap-2">
+   <input type="range" id="pwm_slider" min="0" max="255" value="255" class="flex-1">
+   <span class="k w-10 text-right" id="slider_val">255</span>
+   <button class="btn btn-primary" onclick="setPwm()">Set</button>
+  </div>
+  <div class="mt-2 flex flex-wrap gap-2">
+   <button class="btn" onclick="setPwm(255)">Full</button>
+   <button class="btn" onclick="setPwm(128)">50%</button>
+   <button class="btn" onclick="setPwm(0)">Off</button>
+   <button class="btn" onclick="setAuto()">Auto</button>
+   <div class="ml-auto flex items-center gap-2">
+    <span class="lbl">Cool Lvl</span>
+    <select id="cool_sel"></select>
+    <button class="btn" onclick="setCool()">Set</button>
+   </div>
+  </div>
+ </div>
+
+ <div class="glass p-5 sm:col-span-2">
+  <div class="lbl">Pi Info</div>
+  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+   <dt class="text-slate-400">Model</dt><dd class="k truncate" id="i_model">—</dd>
+   <dt class="text-slate-400">OS</dt><dd class="k truncate" id="i_os">—</dd>
+   <dt class="text-slate-400">Kernel</dt><dd class="k truncate" id="i_kernel">—</dd>
+   <dt class="text-slate-400">Arch</dt><dd class="k" id="i_arch">—</dd>
+   <dt class="text-slate-400">Python</dt><dd class="k" id="i_python">—</dd>
+   <dt class="text-slate-400">Host</dt><dd class="k truncate" id="i_host">—</dd>
+  </dl>
+ </div>
+
+ <div class="glass p-5 sm:col-span-2">
+  <div class="flex items-center justify-between">
+   <div class="lbl">Update Alerts</div>
+   <button class="btn" onclick="refreshUpdates()">Check</button>
+  </div>
+  <div class="val mt-2"><span id="upd_count">—</span> <span class="text-sm text-slate-400 font-normal">packages</span></div>
+  <div class="sub"><span id="upd_sec">—</span> security · checked <span class="k" id="upd_at">—</span></div>
+ </div>
+
+ <div class="glass p-5 sm:col-span-2 lg:col-span-2">
+  <div class="lbl">ArgentOS Services</div>
+  <div id="svc_list" class="mt-3 space-y-2 text-sm">
+   <div class="text-slate-500 text-xs">No services configured. Edit SERVICES in dashboard.py.</div>
+  </div>
+ </div>
+
+</main>
+
+<footer class="max-w-7xl mx-auto mt-6 text-center text-[11px] text-slate-500">
+ pi-dashboard · port 9090 · systemd unit <span class="k">pi-dashboard.service</span>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+function setBar(id, pct){
+ const el = $(id); el.classList.remove('warm','hot');
+ if(pct>=80) el.classList.add('hot');
+ else if(pct>=60) el.classList.add('warm');
+ el.firstElementChild.style.width = Math.max(0,Math.min(100,pct))+'%';
+}
+function fmtAgo(ts){
+ if(!ts) return 'never';
+ const d = Math.max(0, Math.floor(Date.now()/1000)-ts);
+ if(d<60) return d+'s ago';
+ if(d<3600) return Math.floor(d/60)+'m ago';
+ return Math.floor(d/3600)+'h ago';
+}
+async function refresh(){
+ let d;
+ try { d = await (await fetch('/api/stats')).json(); } catch(e){ return; }
+ $('hdr_host').textContent = d.info.hostname || '—';
+ $('hdr_model').textContent = d.info.model || '—';
+ $('cpu_temp').textContent = (d.cpu_temp ?? '—')+'°C';
+ setBar('cpu_temp_bar', (d.cpu_temp||0)/85*100);
+ $('nvme_temp').textContent = (d.nvme_temp ?? '—')+'°C';
+ setBar('nvme_temp_bar', (d.nvme_temp||0)/85*100);
+ $('cpu_pct').textContent = d.cpu_pct+'%';
+ $('load').textContent = 'load '+d.load.join(' · ');
+ setBar('cpu_bar', d.cpu_pct);
+ $('mem').textContent = d.mem.pct+'%';
+ $('mem_sub').textContent = d.mem.used_mb+' / '+d.mem.total_mb+' MB';
+ setBar('mem_bar', d.mem.pct);
+ $('disk').textContent = d.disk.pct+'%';
+ $('disk_sub').textContent = d.disk.used_gb+' / '+d.disk.total_gb+' GB';
+ setBar('disk_bar', d.disk.pct);
+ $('uptime').textContent = d.uptime;
+ $('kernel').textContent = d.info.kernel || '—';
+ $('fan_rpm').textContent = d.fan_rpm;
+ $('pwm').textContent = d.pwm;
+ $('pwm_pct').textContent = d.pwm_pct;
+ $('pwm_mode_chip').textContent = d.pwm_enable===1?'manual':'auto';
+ setBar('fan_bar', d.pwm_pct);
+
+ const sel = $('cool_sel');
+ if(sel.options.length !== d.cool_max+1){
+  sel.innerHTML='';
+  for(let i=0;i<=d.cool_max;i++){
+   const o=document.createElement('option'); o.value=i; o.text='Level '+i; sel.appendChild(o);
+  }
+ }
+ sel.value = d.cool_cur;
+
+ $('i_model').textContent = d.info.model || '—';
+ $('i_os').textContent = d.info.os || '—';
+ $('i_kernel').textContent = d.info.kernel || '—';
+ $('i_arch').textContent = d.info.arch || '—';
+ $('i_python').textContent = d.info.python || '—';
+ $('i_host').textContent = d.info.hostname || '—';
+
+ $('upd_count').textContent = d.updates.count ?? '—';
+ $('upd_sec').textContent = d.updates.security ?? 0;
+ $('upd_at').textContent = fmtAgo(d.updates.checked_at);
+
+ const list = $('svc_list');
+ if(d.services.length === 0){
+  list.innerHTML = '<div class="text-slate-500 text-xs">No services configured. Edit SERVICES in dashboard.py.</div>';
+ } else {
+  list.innerHTML = d.services.map(s => {
+   const color = s.status==='up'?'#34d399':s.status==='degraded'?'#fbbf24':'#f87171';
+   return `<div class="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-white/[.03] border border-white/5">
+    <div class="flex items-center gap-2.5 min-w-0">
+     <span class="dot" style="background:${color};color:${color};"></span>
+     <div class="min-w-0">
+      <div class="text-sm text-white truncate">${s.name}</div>
+      <div class="text-[10px] text-slate-500 truncate k">${s.target}</div>
+     </div>
+    </div>
+    <div class="text-right">
+     <div class="status-${s.status} text-xs font-medium">${s.status.toUpperCase()}</div>
+     <div class="text-[10px] text-slate-500 k">${s.type} · ${s.ms}ms</div>
+    </div>
+   </div>`;
+  }).join('');
+ }
+
+ $('ts').textContent = new Date(d.ts*1000).toLocaleTimeString();
+}
+$('pwm_slider').oninput = e => $('slider_val').textContent = e.target.value;
+async function post(body){
+ await fetch('/api/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ refresh();
+}
+function setPwm(v){ post({pwm: v ?? parseInt($('pwm_slider').value)}); }
+function setAuto(){ post({auto:true}); }
+function setCool(){ post({cool: parseInt($('cool_sel').value)}); }
+async function refreshUpdates(){
+ await fetch('/api/updates/refresh',{method:'POST'});
+ setTimeout(refresh, 500);
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body></html>
+"""
+
+
+# --- HTTP handler ------------------------------------------------------------
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a, **k):
+        pass
+
+    def _json(self, obj, code=200):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            body = INDEX.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/stats":
+            self._json(gather())
+        elif self.path.startswith("/static/"):
+            rel = self.path[len("/static/"):].lstrip("/")
+            fp = os.path.normpath(os.path.join(STATIC_DIR, rel))
+            if not fp.startswith(STATIC_DIR) or not os.path.isfile(fp):
+                self.send_error(404); return
+            ctype = "application/javascript" if fp.endswith(".js") else \
+                    "text/css" if fp.endswith(".css") else "application/octet-stream"
+            with open(fp, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        if self.path == "/api/fan":
+            n = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(n) or b"{}")
+            try:
+                if data.get("auto"):
+                    write(f"{HWMON_FAN}/pwm1_enable", 2)
+                elif "pwm" in data:
+                    write(f"{HWMON_FAN}/pwm1_enable", 1)
+                    write(f"{HWMON_FAN}/pwm1", max(0, min(255, int(data["pwm"]))))
+                elif "cool" in data:
+                    write(f"{COOLING}/cur_state", max(0, min(4, int(data["cool"]))))
+                self._json({"ok": True})
+            except PermissionError:
+                self._json({"ok": False, "error": "needs root"}, 403)
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 500)
+        elif self.path == "/api/updates/refresh":
+            threading.Thread(target=refresh_updates, daemon=True).start()
+            self._json({"ok": True})
+        else:
+            self.send_error(404)
+
+
+if __name__ == "__main__":
+    load_static()
+    threading.Thread(target=updates_loop, daemon=True).start()
+    print(f"Pi dashboard → http://0.0.0.0:{PORT}")
+    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

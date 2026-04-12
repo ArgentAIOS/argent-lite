@@ -16,9 +16,16 @@ required. The other two are opt-in.
 | `argent-lite.service` | The brain. Runs `argent chat`, loads memory, talks to LLM providers, processes prompts. | none (stdin-driven) | **yes** |
 | `argent-lite-ui.service` | Browser launcher. 4 buttons: Start / Stop / Restart / Open Dashboard. | `127.0.0.1:7787` | optional |
 | `argent-lite-kiosk.service` | Voice+touchscreen UI for the walk-up satellite (mic, speaker, orb on 7" display). | `127.0.0.1:7788` | optional (kiosk deploy only) |
+| `pi-dashboard.service` | Operator HUD: CPU/NVMe temps, fan PWM control, CPU/mem/disk, apt updates, live service health (probes every listener above). Runs as root (sysfs fan control). Opt in with `ARGENT_INSTALL_DASHBOARD=1` at install time. | **`0.0.0.0:9090`** (see hardening) | optional |
 
-No service binds to a public address by default. Everything is
-loopback until you edit `/etc/argent-lite/config.json` to change it.
+**Argent services** are loopback-only by default. **`pi-dashboard`** is
+the exception — it binds `0.0.0.0:9090` so you can reach the HUD from
+another machine on your LAN. On a single-operator Pi behind
+`ufw default deny incoming` this is fine; for anything else, change
+the bind to `127.0.0.1` in `deploy/pi-dashboard/dashboard.py` and SSH-
+tunnel the port. There is **no auth** on the HUD — fan control is a
+real hardware knob, `pwm=0` stops the fan, handle accordingly. See
+`deploy/pi-dashboard/HANDOFF.md` §"Security / hardening".
 
 ---
 
@@ -52,6 +59,8 @@ node dist/src/cli/init.js         # interactive wizard: mode, providers, API key
 
 # 3. Install service
 sudo bash scripts/install.sh      # copies dist/, installs unit, reloads systemd
+#    To also install the pi-dashboard operator HUD on :9090:
+#    sudo ARGENT_INSTALL_DASHBOARD=1 bash scripts/install.sh
 
 # 4. Put your master key in the env file (once, one line)
 sudo install -m 600 deploy/env.example /etc/default/argent-lite
@@ -215,10 +224,37 @@ sudo systemctl restart argent-lite
 ## 9. Uninstall
 
 ```bash
-sudo systemctl disable --now argent-lite argent-lite-ui argent-lite-kiosk
+sudo systemctl disable --now argent-lite argent-lite-ui argent-lite-kiosk pi-dashboard
 sudo bash scripts/uninstall.sh
 # Leaves ~/.argent-lite/ and /etc/default/argent-lite alone — remove manually if you want.
 ```
+
+## 9b. pi-dashboard operator HUD
+
+Optional. Install with `ARGENT_INSTALL_DASHBOARD=1` on `scripts/install.sh`.
+
+```bash
+# Start / stop / restart
+sudo systemctl enable --now pi-dashboard
+sudo systemctl restart pi-dashboard      # after editing dashboard.py
+sudo systemctl disable --now pi-dashboard
+
+# Logs
+sudo journalctl -u pi-dashboard -f
+
+# Full-blast fan from the CLI (bypasses dashboard UI)
+echo 1   | sudo tee /sys/class/hwmon/hwmon3/pwm1_enable
+echo 255 | sudo tee /sys/class/hwmon/hwmon3/pwm1
+
+# What it probes: argent-lite UI launcher (7787), kiosk (7788), ollama
+# (11434), argentos-core (8000). Once each listener exposes /healthz the
+# HUD will show version + uptime per card instead of just UP/DOWN — see
+# deploy/pi-dashboard/HANDOFF.md §"What argent-lite needs to expose".
+```
+
+Stdlib-only Python 3, no pip, no venv, no node. Source + hardening
+notes live at `deploy/pi-dashboard/` in this repo (vendored from
+the original at `/home/jason/scripts/pi-dashboard/`).
 
 ---
 
