@@ -1,13 +1,13 @@
-# Task 019 — reviewer
+# Task 020 — reviewer
 
 Single pass, outbox only. NO commit. NO PR.
 
 Branches:
-- codex/security-threat-model
-- codex/obs-file-sink
-- codex/memory-encryption
-- codex/router-circuit-breaker
+- codex/ui-and-onboarding-design
+- codex/ui-launcher-impl
+- codex/init-wizard
+- codex/satellite-mode-wiring
 
 Contract: ops/contracts/reviewer.contract.md
-Slice: cycle19-review
+Slice: cycle20-review
 Deadline: ≤5 minutes.
