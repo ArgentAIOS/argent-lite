@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Argent Lite Launcher
+Comment=Control Argent Lite service
+Exec=xdg-open http://127.0.0.1:7787
+Icon=applications-system
+Terminal=false
+Categories=System;Utility;
