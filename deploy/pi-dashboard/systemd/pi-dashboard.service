@@ -1,0 +1,26 @@
+[Unit]
+Description=Pi System Dashboard (operator HUD for argent-lite)
+Documentation=https://github.com/ArgentAIOS/argent-lite/blob/main/deploy/pi-dashboard/HANDOFF.md
+After=network.target
+
+[Service]
+Type=simple
+# /opt/argent-lite/pi-dashboard/ is populated by scripts/install.sh when
+# ARGENT_INSTALL_DASHBOARD=1. Root is required because the dashboard writes to
+# /sys/class/hwmon/*/pwm1 for fan control — see HANDOFF.md "Security / hardening"
+# for the path to drop privileges.
+ExecStart=/usr/bin/python3 /opt/argent-lite/pi-dashboard/dashboard.py
+Restart=on-failure
+RestartSec=3
+User=root
+
+# Observability: everything lands in journald via stdout/stderr.
+StandardOutput=journal
+StandardError=journal
+
+# Kill tree on stop so child processes (apt list, etc.) go away cleanly.
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
