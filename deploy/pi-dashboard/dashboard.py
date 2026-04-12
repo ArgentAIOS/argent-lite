@@ -18,14 +18,23 @@ HWMON_NVME_TEMP = "/sys/class/hwmon/hwmon1/temp1_input"
 
 # Services to health-check. Add entries as ArgentOS grows.
 # Use "url" for HTTP probes or "systemd" for unit checks.
+# Each service entry:
+#   name   — display label
+#   type   — badge label (API / WS / Web / Service)
+#   url    — optional: HTTP health probe
+#   tcp    — optional: (host, port) TCP-connect probe
+#   unit   — optional: systemd unit name. If present, dashboard shows
+#            start/stop/restart buttons and queries ActiveState via
+#            _unit_cmd(..., _unit_scope(unit)). Auto-detects scope per unit.
 SERVICES = [
-    {"name": "argentos-core", "type": "API", "url": "http://127.0.0.1:8000/health"},
-    {"name": "argentos-gateway", "type": "WS", "tcp": ("127.0.0.1", 18789)},
-    {"name": "argentos-desktop", "type": "Web", "tcp": ("127.0.0.1", 8080)},
-    # argent-lite listeners (loopback-only, phase-gated — down until deployed):
-    {"name": "argent-desktop-ui", "type": "Web", "tcp": ("127.0.0.1", 7787)},
-    {"name": "argent-kiosk/satellite", "type": "Gateway", "tcp": ("127.0.0.1", 7788)},
-    {"name": "ollama", "type": "API", "url": "http://127.0.0.1:11434/"},
+    {"name": "argent-lite",     "type": "Service", "unit": "argent-lite.service",     "tcp": None},
+    {"name": "argent-gateway",  "type": "WS",      "unit": "argent-gateway.service",  "tcp": ("127.0.0.1", 18789)},
+    {"name": "argentos-desktop","type": "Web",     "tcp": ("127.0.0.1", 8080)},
+    {"name": "argentos-core",   "type": "API",     "url": "http://127.0.0.1:8000/health"},
+    {"name": "ollama",          "type": "API",     "url": "http://127.0.0.1:11434/"},
+    {"name": "argent-lite-ui",  "type": "Web",     "unit": "argent-lite-ui.service",  "tcp": ("127.0.0.1", 7787)},
+    {"name": "argent-kiosk",    "type": "Web",     "unit": "argent-lite-kiosk.service","tcp": ("127.0.0.1", 7788)},
+    {"name": "pi-dashboard",    "type": "Service", "unit": "pi-dashboard.service",    "tcp": ("127.0.0.1", 9090)},
 ]
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -180,6 +189,88 @@ def argent_gateway_action(action):
             "ok": r.returncode == 0,
             "code": r.returncode,
             "stderr": r.stderr.strip()[:400],
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+# ── Generic systemd control for any SERVICES entry ─────────────────────────
+_UNIT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9@\-_.]+\.service$")
+
+
+def _find_service(name):
+    for svc in SERVICES:
+        if svc.get("name") == name:
+            return svc
+    return None
+
+
+def generic_service_status(name):
+    """Return {active, sub, pid, scope, unit, port_listening} for one SERVICES entry."""
+    svc = _find_service(name)
+    if not svc:
+        return {"error": "unknown service"}
+    unit = svc.get("unit")
+    result = {
+        "name": name,
+        "unit": unit,
+        "scope": None,
+        "active": None,
+        "sub": None,
+        "pid": 0,
+        "port_listening": None,
+    }
+    if unit:
+        scope = _unit_scope(unit)
+        result["scope"] = scope
+        try:
+            argv = _unit_cmd("show", unit, scope)
+            argv += ["-p", "ActiveState", "-p", "SubState", "-p", "MainPID"]
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                props = {}
+                for line in r.stdout.splitlines():
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        props[k] = v
+                result["active"] = props.get("ActiveState")
+                result["sub"] = props.get("SubState")
+                result["pid"] = int(props.get("MainPID", "0") or "0")
+        except Exception as e:
+            result["error"] = str(e)[:200]
+    tcp = svc.get("tcp")
+    if tcp:
+        try:
+            with socket.create_connection(tcp, timeout=0.5):
+                result["port_listening"] = True
+        except Exception:
+            result["port_listening"] = False
+    return result
+
+
+def generic_service_action(name, action):
+    """start | stop | restart for any SERVICES entry that has a `unit` field."""
+    if action not in ("start", "stop", "restart"):
+        return {"ok": False, "error": "invalid action"}
+    svc = _find_service(name)
+    if not svc:
+        return {"ok": False, "error": "unknown service"}
+    unit = svc.get("unit")
+    if not unit:
+        return {"ok": False, "error": "service has no unit — not controllable"}
+    if not _UNIT_NAME_RE.match(unit):
+        return {"ok": False, "error": "bad unit name"}
+    scope = _unit_scope(unit)
+    try:
+        argv = _unit_cmd(action, unit, scope)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        return {
+            "ok": r.returncode == 0,
+            "code": r.returncode,
+            "stderr": r.stderr.strip()[:400],
+            "scope": scope,
         }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timeout"}
@@ -351,35 +442,60 @@ def probe_services():
     for svc in SERVICES:
         status = "down"
         detail = ""
+        unit = svc.get("unit")
+        scope = _unit_scope(unit) if unit else None
         t0 = time.time()
         try:
-            if "url" in svc:
+            # 1. If there's a URL or TCP probe, that's the live-traffic source
+            #    of truth — a listening port is a better signal than systemd
+            #    state for "is this service actually serving requests".
+            if svc.get("url"):
                 req = urllib.request.Request(svc["url"])
                 with urllib.request.urlopen(req, timeout=0.8) as r:
                     status = "up" if 200 <= r.status < 400 else "degraded"
                     detail = f"HTTP {r.status}"
-            elif "tcp" in svc:
+            elif svc.get("tcp"):
                 host, port = svc["tcp"]
                 with socket.create_connection((host, port), timeout=0.5):
                     status = "up"
                     detail = f"tcp {host}:{port}"
-            elif "systemd" in svc:
-                r = subprocess.run(
-                    ["systemctl", "is-active", svc["systemd"]],
-                    capture_output=True, text=True, timeout=1.5,
-                )
+            elif unit:
+                # No network probe available — fall back to systemctl is-active.
+                argv = _unit_cmd("is-active", unit, scope)
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
                 out = r.stdout.strip()
                 status = "up" if out == "active" else "down"
-                detail = out
+                detail = out or "unknown"
         except Exception as e:
             detail = type(e).__name__
+            # If the port/URL probe failed but we have a unit, still try to
+            # check it — helps distinguish "crashed" from "never installed".
+            if unit and status == "down":
+                try:
+                    argv = _unit_cmd("is-active", unit, scope)
+                    r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
+                    out = r.stdout.strip()
+                    if out == "active":
+                        detail = f"{detail} (active, port closed)"
+                    elif out:
+                        detail = f"{detail} ({out})"
+                except Exception:
+                    pass
+        target = (
+            svc.get("url")
+            or (f"{svc['tcp'][0]}:{svc['tcp'][1]}" if svc.get("tcp") else None)
+            or unit
+            or ""
+        )
         results.append({
             "name": svc["name"],
             "type": svc["type"],
             "status": status,
             "detail": detail,
             "ms": round((time.time() - t0) * 1000),
-            "target": svc.get("url") or (f"{svc['tcp'][0]}:{svc['tcp'][1]}" if "tcp" in svc else svc.get("systemd", "")),
+            "target": target,
+            "unit": unit,
+            "scope": scope,
         })
     return results
 
@@ -461,6 +577,7 @@ INDEX = r"""<!doctype html>
   transition:all .15s;cursor:pointer;display:inline-block;text-decoration:none;}
  a.btn{color:#e6edf7;}
  .btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2);}
+ .btn-xs{padding:3px 7px;font-size:11px;border-radius:6px;line-height:1;}
  .btn-primary{background:linear-gradient(135deg,#22d3ee,#a855f7);border-color:transparent;}
  .btn-primary:hover{filter:brightness(1.1);}
  select,input[type=range]{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
@@ -745,18 +862,26 @@ async function refresh(){
  } else {
   list.innerHTML = d.services.map(s => {
    const color = s.status==='up'?'#34d399':s.status==='degraded'?'#fbbf24':'#f87171';
+   const ctl = s.unit
+    ? `<div class="flex gap-1 ml-2">
+        <button class="btn btn-xs" title="Start ${s.name}" onclick="svcAction('${s.name}','start')">▶</button>
+        <button class="btn btn-xs" title="Stop ${s.name}"  onclick="svcAction('${s.name}','stop')">■</button>
+        <button class="btn btn-xs" title="Restart ${s.name}" onclick="svcAction('${s.name}','restart')">↻</button>
+       </div>`
+    : '<div class="w-[92px] ml-2 text-[10px] text-slate-600 text-right">no unit</div>';
    return `<div class="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-white/[.03] border border-white/5">
-    <div class="flex items-center gap-2.5 min-w-0">
+    <div class="flex items-center gap-2.5 min-w-0 flex-1">
      <span class="dot" style="background:${color};color:${color};"></span>
-     <div class="min-w-0">
+     <div class="min-w-0 flex-1">
       <div class="text-sm text-white truncate">${s.name}</div>
       <div class="text-[10px] text-slate-500 truncate k">${s.target}</div>
      </div>
     </div>
     <div class="text-right">
      <div class="status-${s.status} text-xs font-medium">${s.status.toUpperCase()}</div>
-     <div class="text-[10px] text-slate-500 k">${s.type} · ${s.ms}ms</div>
+     <div class="text-[10px] text-slate-500 k">${s.type} · ${s.ms}ms${s.scope?' · '+s.scope:''}</div>
     </div>
+    ${ctl}
    </div>`;
   }).join('');
  }
@@ -774,6 +899,15 @@ function setCool(){ post({cool: parseInt($('cool_sel').value)}); }
 async function refreshUpdates(){
  await fetch('/api/updates/refresh',{method:'POST'});
  refresh();
+}
+async function svcAction(name, action){
+ const prev = $('svc_list');
+ try {
+  const r = await fetch('/api/service/'+encodeURIComponent(name)+'/'+action, {method:'POST'});
+  const j = await r.json();
+  if (!j.ok) console.warn('svc '+name+' '+action+': '+(j.error||j.stderr||'failed'));
+ } catch(e){ console.warn(e); }
+ setTimeout(refresh, 500);
 }
 async function alAction(action){
  const msg = $('al_msg');
@@ -898,6 +1032,14 @@ class Handler(BaseHTTPRequestHandler):
                            "/api/argent-gateway/restart"):
             action = self.path.rsplit("/", 1)[-1]
             self._json(argent_gateway_action(action))
+        elif self.path.startswith("/api/service/"):
+            # Generic per-service control: POST /api/service/<name>/<action>
+            parts = self.path[len("/api/service/"):].split("/")
+            if len(parts) != 2:
+                self._json({"ok": False, "error": "expected /api/service/<name>/<action>"}, 400)
+                return
+            svc_name, action = parts
+            self._json(generic_service_action(svc_name, action))
         elif self.path == "/api/launch/desktop":
             # Best-effort xdg-open from server side; client also opens a tab.
             try:
