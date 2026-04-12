@@ -1,0 +1,36 @@
+[Unit]
+Description=ArgentOS Gateway runtime (WebSocket API for the React dashboard)
+Documentation=https://github.com/ArgentAIOS/argent-lite/blob/main/docs/operator-guide.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=argent-lite
+Group=argent-lite
+WorkingDirectory=/opt/argentos-core
+# Gateway reads its bearer token from /etc/default/argent-gateway (mode 0600),
+# which the installer drops alongside /etc/default/argent-lite. Keep the same
+# token in the dashboard's .env.local so the React UI can connect.
+EnvironmentFile=/etc/default/argent-gateway
+Environment=ARGENT_GATEWAY_PORT=18789
+# ARGENT_SKIP_CHANNELS=1 keeps the gateway headless in dev — channels are
+# owned by argent-lite, not argentos-core, on this Pi.
+Environment=ARGENT_SKIP_CHANNELS=1
+ExecStart=/usr/bin/pnpm --dir /opt/argentos-core run gateway:dev
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+# First-start tsdown build takes ~40s on Pi 5; allow headroom.
+TimeoutStartSec=180
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/argent-lite /var/log/argent-lite /home/jason/.argentos /home/jason/.argentos-dev
+
+[Install]
+WantedBy=multi-user.target

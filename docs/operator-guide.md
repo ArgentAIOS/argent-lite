@@ -16,7 +16,8 @@ required. The other two are opt-in.
 | `argent-lite.service` | The brain. Runs `argent chat`, loads memory, talks to LLM providers, processes prompts. | none (stdin-driven) | **yes** |
 | `argent-lite-ui.service` | Browser launcher. 4 buttons: Start / Stop / Restart / Open Dashboard. | `127.0.0.1:7787` | optional |
 | `argent-lite-kiosk.service` | Voice+touchscreen UI for the walk-up satellite (mic, speaker, orb on 7" display). | `127.0.0.1:7788` | optional (kiosk deploy only) |
-| `pi-dashboard.service` | Operator HUD: CPU/NVMe temps, fan PWM control, CPU/mem/disk, apt updates, live service health (probes every listener above). Runs as root (sysfs fan control). Opt in with `ARGENT_INSTALL_DASHBOARD=1` at install time. | **`0.0.0.0:9090`** (see hardening) | optional |
+| `pi-dashboard.service` | Operator HUD: CPU/NVMe temps, fan PWM control, CPU/mem/disk, apt updates, live service health (probes every listener above). Runs as root (sysfs fan control). **Merged launcher controls**: start/stop/restart `argent-lite` and `argent-gateway`, open ArgentOS Desktop, reserved Kiosk slot. Opt in with `ARGENT_INSTALL_DASHBOARD=1` at install time. | **`0.0.0.0:9090`** (see hardening) | optional |
+| `argent-gateway.service` | ArgentOS WebSocket gateway (`pnpm run gateway:dev` in `$ARGENT_CORE_DIR`). Serves the React dashboard at :8080 — agent streams, chat RPC, workflow canvas, system registry all talk here. Token-authenticated; same token goes in the dashboard's `.env.local` as `VITE_GATEWAY_TOKEN`. Opt in with `ARGENT_INSTALL_GATEWAY=1 ARGENT_CORE_DIR=/path/to/argentos-core` at install time. | `127.0.0.1:18789` | optional |
 
 **Argent services** are loopback-only by default. **`pi-dashboard`** is
 the exception — it binds `0.0.0.0:9090` so you can reach the HUD from
@@ -59,8 +60,11 @@ node dist/src/cli/init.js         # interactive wizard: mode, providers, API key
 
 # 3. Install service
 sudo bash scripts/install.sh      # copies dist/, installs unit, reloads systemd
-#    To also install the pi-dashboard operator HUD on :9090:
-#    sudo ARGENT_INSTALL_DASHBOARD=1 bash scripts/install.sh
+#    Combined install (HUD + gateway):
+#    sudo ARGENT_INSTALL_DASHBOARD=1 \
+#         ARGENT_INSTALL_GATEWAY=1 \
+#         ARGENT_CORE_DIR=/home/jason/code/argentos-core \
+#         bash scripts/install.sh
 
 # 4. Put your master key in the env file (once, one line)
 sudo install -m 600 deploy/env.example /etc/default/argent-lite
@@ -229,9 +233,20 @@ sudo bash scripts/uninstall.sh
 # Leaves ~/.argent-lite/ and /etc/default/argent-lite alone — remove manually if you want.
 ```
 
-## 9b. pi-dashboard operator HUD
+## 9b. pi-dashboard operator HUD + launcher
 
 Optional. Install with `ARGENT_INSTALL_DASHBOARD=1` on `scripts/install.sh`.
+
+Single operator entry point at `http://<pi-host>:9090` — shows temps /
+fan / CPU / memory / disk / apt updates / service health and embeds
+start/stop/restart controls for both `argent-lite` and `argent-gateway`
+in the "Argent Lite Runtime" card. The header has two launcher
+buttons: **ArgentOS Desktop** (opens React UI at :8080 in a new tab)
+and **Kiosk** (placeholder until cycle-21).
+
+The Desktop button auto-disables (dims + tooltip) when the gateway
+isn't listening on :18789, so the operator is pushed to start the
+gateway before opening the dashboard.
 
 ```bash
 # Start / stop / restart
@@ -255,6 +270,39 @@ echo 255 | sudo tee /sys/class/hwmon/hwmon3/pwm1
 Stdlib-only Python 3, no pip, no venv, no node. Source + hardening
 notes live at `deploy/pi-dashboard/` in this repo (vendored from
 the original at `/home/jason/scripts/pi-dashboard/`).
+
+## 9c. argent-gateway (ArgentOS WebSocket API)
+
+Optional. Install with `ARGENT_INSTALL_GATEWAY=1 ARGENT_CORE_DIR=/path/to/argentos-core`.
+
+Runs `pnpm run gateway:dev` inside `$ARGENT_CORE_DIR` and listens on
+`ws://127.0.0.1:18789`. The React dashboard at :8080 connects here
+for all its agent/chat/workflow data. Without the gateway the
+dashboard loads but shows "Not connected to Gateway".
+
+```bash
+# Start / stop / restart (or do it from pi-dashboard's Argent Lite card)
+sudo systemctl enable --now argent-gateway
+sudo systemctl restart argent-gateway
+sudo systemctl stop argent-gateway
+
+# Watch logs — first start builds TypeScript for ~40s
+sudo journalctl -u argent-gateway -f
+
+# Verify port is bound after start
+ss -ltn | grep 18789
+
+# Regenerate the auth token (must match VITE_GATEWAY_TOKEN in dashboard/.env.local)
+openssl rand -hex 24 | sudo tee -a /etc/default/argent-gateway
+sudo systemctl restart argent-gateway
+```
+
+**Token pair rule:** the token in `/etc/default/argent-gateway`
+(`ARGENT_GATEWAY_TOKEN=...`) and the token in
+`$ARGENT_CORE_DIR/dashboard/.env.local`
+(`VITE_GATEWAY_TOKEN=...`) **must be identical**. Rotate them
+together. On token mismatch, the dashboard's gateway status chip
+reads "unauthorized — check token" and chat/RPC is unavailable.
 
 ---
 

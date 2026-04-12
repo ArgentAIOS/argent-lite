@@ -16,6 +16,14 @@ INSTALL_DASHBOARD="${ARGENT_INSTALL_DASHBOARD:-0}"
 DASHBOARD_INSTALL_DIR="$INSTALL_DIR/pi-dashboard"
 DASHBOARD_UNIT_PATH="/etc/systemd/system/pi-dashboard.service"
 
+# Optional ArgentOS gateway unit. Gated by env var — only install it when the
+# sibling argentos-core repo is present at $ARGENT_CORE_DIR (default
+# /opt/argentos-core). The unit runs `pnpm run gateway:dev` inside that tree.
+INSTALL_GATEWAY="${ARGENT_INSTALL_GATEWAY:-0}"
+ARGENT_CORE_DIR="${ARGENT_CORE_DIR:-/opt/argentos-core}"
+GATEWAY_UNIT_PATH="/etc/systemd/system/argent-gateway.service"
+GATEWAY_ENV_EXAMPLE_DST="/etc/default/argent-gateway.example"
+
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log() { printf '[install] %s\n' "$*"; }
@@ -90,6 +98,31 @@ else
     log "ARGENT_INSTALL_DASHBOARD not set — skipping pi-dashboard (operator HUD)"
 fi
 
+# ── Optional ArgentOS Gateway ─────────────────────────────────────────────────
+if [[ "$INSTALL_GATEWAY" == "1" ]]; then
+    log "ARGENT_INSTALL_GATEWAY=1 — installing argent-gateway unit"
+
+    if [[ ! -d "$ARGENT_CORE_DIR" ]]; then
+        err "ARGENT_INSTALL_GATEWAY=1 but $ARGENT_CORE_DIR does not exist — clone argentos-core first or override ARGENT_CORE_DIR"
+    fi
+
+    log "  installing unit file to $GATEWAY_UNIT_PATH"
+    install -m 0644 "$INSTALL_DIR/deploy/argent-gateway.service" "$GATEWAY_UNIT_PATH"
+
+    log "  installing env example to $GATEWAY_ENV_EXAMPLE_DST"
+    install -m 0644 "$INSTALL_DIR/deploy/argent-gateway.env.example" "$GATEWAY_ENV_EXAMPLE_DST"
+
+    # If the unit file points at the default /opt/argentos-core but operator
+    # has an override, rewrite the WorkingDirectory line in place (best-effort;
+    # operator can always edit /etc/systemd/system/argent-gateway.service).
+    if [[ "$ARGENT_CORE_DIR" != "/opt/argentos-core" ]]; then
+        sed -i "s|WorkingDirectory=/opt/argentos-core|WorkingDirectory=$ARGENT_CORE_DIR|g; s|--dir /opt/argentos-core|--dir $ARGENT_CORE_DIR|g" "$GATEWAY_UNIT_PATH"
+        log "  rewrote unit WorkingDirectory → $ARGENT_CORE_DIR"
+    fi
+else
+    log "ARGENT_INSTALL_GATEWAY not set — skipping argent-gateway (ArgentOS WebSocket API)"
+fi
+
 log "reloading systemd"
 systemctl daemon-reload
 
@@ -125,6 +158,30 @@ if [[ "$INSTALL_DASHBOARD" != "1" ]]; then
 Optional pi-dashboard (operator HUD) NOT installed.
   To install later, rerun with:
     sudo ARGENT_INSTALL_DASHBOARD=1 bash scripts/install.sh
+
+EOF
+fi
+
+if [[ "$INSTALL_GATEWAY" == "1" ]]; then
+    cat <<EOF
+Optional argent-gateway (ArgentOS WebSocket API on :18789):
+  9. cp $GATEWAY_ENV_EXAMPLE_DST /etc/default/argent-gateway
+     chown root:$SERVICE_USER /etc/default/argent-gateway
+     chmod 0640 /etc/default/argent-gateway
+ 10. Edit /etc/default/argent-gateway and set ARGENT_GATEWAY_TOKEN (openssl rand -hex 24).
+     Put the SAME token in $ARGENT_CORE_DIR/dashboard/.env.local as VITE_GATEWAY_TOKEN.
+ 11. systemctl enable --now argent-gateway.service
+ 12. First start builds TypeScript (~40s on Pi 5). Watch with:
+        journalctl -u argent-gateway -f
+
+EOF
+fi
+
+if [[ "$INSTALL_GATEWAY" != "1" ]]; then
+    cat <<EOF
+Optional argent-gateway (ArgentOS WebSocket API) NOT installed.
+  To install later, rerun with:
+    sudo ARGENT_CORE_DIR=/path/to/argentos-core ARGENT_INSTALL_GATEWAY=1 bash scripts/install.sh
 
 EOF
 fi
